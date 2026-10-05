@@ -121,7 +121,6 @@ app.get("/", (req, res) => {
     text-transform: uppercase;
   }
 
-  /* Efeito de linhas de monitor CRT */
   .scanlines {
     position: fixed;
     top: 0; left: 0; width: 100vw; height: 100vh;
@@ -131,7 +130,6 @@ app.get("/", (req, res) => {
     z-index: 999;
   }
 
-  /* Grelha do HUD - Quebrando a estrutura antiga */
   .hud-wrapper {
     display: grid;
     grid-template-areas: 
@@ -150,19 +148,16 @@ app.get("/", (req, res) => {
   header h1 { margin: 0; font-size: 2em; color: var(--hud-cyan); text-shadow: 0 0 10px var(--hud-cyan); letter-spacing: 4px; }
   header .status-box { background: ${data.status.color}; color: #000; padding: 5px 15px; font-weight: bold; letter-spacing: 2px; }
 
-  /* Painel Cortado (Sci-Fi Clip Path) */
   .hud-panel {
     background: rgba(0, 20, 40, 0.4);
     border: 1px solid var(--hud-cyan);
     padding: 20px;
-    /* Aqui está o segredo estrutural: corta os cantos do container */
     clip-path: polygon(20px 0, 100% 0, 100% calc(100% - 20px), calc(100% - 20px) 100%, 0 100%, 0 20px);
     position: relative;
     display: flex;
     flex-direction: column;
   }
   
-  /* Sombra interna para o painel */
   .hud-panel::before {
     content: ''; position: absolute; top: 0; left: 0; right: 0; bottom: 0;
     box-shadow: inset 0 0 30px var(--hud-cyan-dim); pointer-events: none;
@@ -170,25 +165,21 @@ app.get("/", (req, res) => {
 
   .hud-panel h2 { margin-top: 0; font-size: 1.1em; color: var(--hud-cyan); border-bottom: 1px dashed var(--hud-cyan-dim); padding-bottom: 10px; margin-bottom: 15px; letter-spacing: 1px;}
 
-  /* Áreas específicas da grelha */
   .area-left { grid-area: left; }
   .area-center { grid-area: center; display: flex; flex-direction: column; gap: 20px; }
   .area-right { grid-area: right; }
   .area-bottom { grid-area: bottom; }
 
-  /* Grid de KPIs no Centro */
   .kpi-target { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 15px; }
   .kpi-item { border: 1px solid var(--hud-cyan); padding: 15px; text-align: center; background: rgba(0, 240, 255, 0.05); }
   .kpi-item span { display: block; font-size: 0.8em; color: #8cb4c7; margin-bottom: 10px; }
   .kpi-item strong { font-size: 2em; color: var(--hud-cyan); text-shadow: 0 0 8px var(--hud-cyan); }
 
-  /* Listas de Dados estilo Telemetria */
   .telemetry-list { list-style: none; padding: 0; margin: 0; flex: 1; }
   .telemetry-list li { display: flex; justify-content: space-between; font-size: 0.9em; margin-bottom: 12px; }
   .telemetry-list li span:first-child { color: #5a8d9e; }
   .telemetry-list li span:last-child { color: #fff; text-align: right; }
 
-  /* Terminal Estreito e Largo na Base */
   .terminal-output {
     flex: 1;
     overflow-y: auto;
@@ -199,7 +190,6 @@ app.get("/", (req, res) => {
   }
   .log-line { border-left: 2px solid var(--hud-cyan); padding-left: 10px; margin-bottom: 4px; }
 
-  /* Scrollbar HUD */
   ::-webkit-scrollbar { width: 5px; }
   ::-webkit-scrollbar-track { background: transparent; }
   ::-webkit-scrollbar-thumb { background: var(--hud-cyan); }
@@ -219,7 +209,7 @@ app.get("/", (req, res) => {
         <h1>SYS.MONITOR.v2</h1>
         <div style="font-size: 0.8em; color: #5a8d9e; margin-top: 5px;">T: ${new Date().toLocaleTimeString('pt-PT')} // UPTIME: ${formatUptime(process.uptime())}</div>
       </div>
-      <div class="status-box ${ramUsage > 85 ? 'blink' : ''}">ESTADO: ${data.status.text}</div>
+      <div class="status-box ${data.ramUsage > 85 ? 'blink' : ''}">ESTADO: ${data.status.text}</div>
     </header>
 
     <!-- Coluna Esquerda: Hardware -->
@@ -279,7 +269,7 @@ app.get("/", (req, res) => {
     <div class="hud-panel area-bottom">
       <h2>// FLUXO DE EVENTOS DO SISTEMA <span class="blink" style="float: right;">_</span></h2>
       <div class="terminal-output">
-        ${logsArray.length > 0 ? logsArray.map(log => `<div class="log-line">${log}</div>`).join("") : "<div class="log-line">A AGUARDAR DADOS DE ENTRADA...</div>"}
+        ${logsArray.length > 0 ? logsArray.map(log => `<div class="log-line">${log}</div>`).join("") : '<div class="log-line">A AGUARDAR DADOS DE ENTRADA...</div>'}
       </div>
     </div>
   </div>
@@ -300,9 +290,9 @@ app.get("/", (req, res) => {
           borderColor: '#00f0ff',
           backgroundColor: 'rgba(0, 240, 255, 0.1)',
           borderWidth: 2, 
-          tension: 0, /* Linhas retas e duras, sem curvas suaves */
+          tension: 0, 
           fill: true, 
-          pointRadius: 0, /* Remove os pontos para parecer um radar bruto */
+          pointRadius: 0, 
           stepped: false
         }]
       },
@@ -312,7 +302,7 @@ app.get("/", (req, res) => {
         animation: false,
         scales: { 
           y: { beginAtZero: true, max: 100, grid: { color: 'rgba(0, 240, 255, 0.2)' }, border: { dash: [5, 5] } },
-          x: { grid: { color: 'rgba(0, 240, 255, 0.2)' }, border: { dash: [5, 5] }, ticks: { display: false } } /* Oculta as horas no eixo X para um visual mais limpo */
+          x: { grid: { color: 'rgba(0, 240, 255, 0.2)' }, border: { dash: [5, 5] }, ticks: { display: false } } 
         },
         plugins: {
           legend: { display: false }
