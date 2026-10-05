@@ -45,11 +45,13 @@ function gb(v) { return (v / 1024 / 1024 / 1024).toFixed(2); }
 function mb(v) { return (v / 1024 / 1024).toFixed(2); }
 function percent(part, total) { return total ? ((part / total) * 100).toFixed(0) : "0"; }
 
+// Adicionada a contagem de SEGUNDOS (s) para evitar que o tempo pareça zerado
 function formatUptime(seconds) {
-  const days = Math.floor(seconds / 86400);
-  const hours = Math.floor((seconds % 86400) / 3600);
-  const minutes = Math.floor((seconds % 3600) / 60);
-  return `${days}d ${hours}h ${minutes}m`;
+  const d = Math.floor(seconds / 86400);
+  const h = Math.floor((seconds % 86400) / 3600);
+  const m = Math.floor((seconds % 3600) / 60);
+  const s = Math.floor(seconds % 60);
+  return `${d}d ${h}h ${m}m ${s}s`;
 }
 
 function getIPs() {
@@ -197,23 +199,11 @@ p { margin: 6px 0; }
   <div class="card kpi"><h3>Uso de RAM</h3><div class="value">${ramPercent}%</div></div>
   <div class="card kpi"><h3>CPU Média</h3><div class="value">${avgCpu}%</div></div>
   <div class="card kpi"><h3>Tráfego</h3><div class="value">${totalRequests} reqs</div></div>
-  <div class="card kpi"><h3>Uptime</h3><div class="value" style="font-size: 18px;">${formatUptime(uptime)}</div></div>
+  <div class="card kpi"><h3>Uptime App</h3><div class="value" style="font-size: 16px;">${formatUptime(process.uptime())}</div></div>
   <div class="card kpi" style="background: #fff; border: 2px solid ${health.color};"><h3 style="color: #666;">Status Geral</h3><div class="value"><span class="badge" style="background:${health.color}">${health.label}</span></div></div>
 </div>
 
 <div class="grid">
-
-<!-- Bloco Cheio: Gráfico -->
-<div class="card" style="grid-column: 1 / -1; font-family: 'Nunito', sans-serif;">
-  <h2>📊 Consumo de RAM (Últimos 2.5 min)</h2>
-  <div style="height: 200px; width: 100%;"><canvas id="ramChart"></canvas></div>
-</div>
-
-<!-- Bloco Cheio: Terminal -->
-<div class="card" style="grid-column: 1 / -1; font-family: 'Nunito', sans-serif;">
-  <h2>>_ Monitor de Logs (console.log)</h2>
-  <div class="terminal">${logsArray.length > 0 ? logsArray.join("<br>") : "Nenhum log registrado ainda..."}</div>
-</div>
 
 <!-- Bloco: Sistema -->
 <div class="card">
@@ -315,6 +305,18 @@ p { margin: 6px 0; }
     <tr><th>Nome</th><th>Tipo</th><th>Tamanho</th></tr>
     ${files.map(f => `<tr><td>${f.name}</td><td>${f.type}</td><td>${f.size}</td></tr>`).join("")}
   </table>
+</div>
+
+<!-- Gráfico movido para baixo -->
+<div class="card" style="grid-column: 1 / -1; font-family: 'Nunito', sans-serif;">
+  <h2>📊 Consumo de RAM (Últimos 2.5 min)</h2>
+  <div style="height: 200px; width: 100%;"><canvas id="ramChart"></canvas></div>
+</div>
+
+<!-- Terminal movido para baixo -->
+<div class="card" style="grid-column: 1 / -1; font-family: 'Nunito', sans-serif;">
+  <h2>>_ Monitor de Logs (console.log)</h2>
+  <div class="terminal">${logsArray.length > 0 ? logsArray.join("<br>") : "Nenhum log registrado ainda..."}</div>
 </div>
 
 </div>
