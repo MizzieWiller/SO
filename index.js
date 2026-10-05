@@ -190,10 +190,10 @@ app.get("/", (req, res) => {
 
   /* vinil */
   .stage { grid-column: 1 / 2; grid-row: 1 / 4; position: relative; }
-  .arc { position: absolute; left: -330px; top: 80px; width: 700px; height: 700px; overflow: visible; }
+  .arc { position: absolute; left: -260px; top: 81px; width: 700px; height: 700px; overflow: visible; }
   .arc circle { fill: none; stroke-linecap: round; transform-origin: 350px 350px; transform: rotate(-135deg); }
   .vinyl {
-    position: absolute; left: -330px; top: 106px; width: 650px; height: 650px; border-radius: 50%;
+    position: absolute; left: -235px; top: 106px; width: 650px; height: 650px; border-radius: 50%;
     background:
       radial-gradient(circle, #fff 0 9%, #0b0c0e 9.2% 100%),
       repeating-radial-gradient(circle, #101114 0 2px, #1d1f23 3px 4px);
@@ -209,7 +209,7 @@ app.get("/", (req, res) => {
     content: ""; position: absolute; left: 50%; top: 50%; width: 14px; height: 14px; margin: -7px; border-radius: 50%; background: #0b0c0e;
   }
   .vinyl-label {
-    position: absolute; left: -330px; top: 106px; width: 650px; height: 650px; display: grid; place-items: center; pointer-events: none;
+    position: absolute; left: -235px; top: 106px; width: 650px; height: 650px; display: grid; place-items: center; pointer-events: none;
   }
   .vinyl-label span {
     position: relative; z-index: 2; width: 125px; height: 125px; border-radius: 50%; background: #fff;
@@ -316,7 +316,8 @@ app.get("/", (req, res) => {
     nav { flex-wrap: wrap; padding-top: 28px; }
     .user { justify-content: flex-start; padding-top: 18px; text-align: left; }
     .stage { height: 300px; margin: 10px -22px 0; overflow: hidden; }
-    .arc, .vinyl, .vinyl-label { left: -300px; top: -60px; }
+    .vinyl, .vinyl-label { left: -265px; top: -60px; }
+    .arc { left: -290px; top: -85px; }
     .ctrl { display: none; }
     .big { margin-top: 20px; font-size: 44px; }
     .side { padding-top: 10px; }
