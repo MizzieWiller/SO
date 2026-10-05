@@ -1,7 +1,6 @@
 const express = require("express");
 const os = require("os");
 const fs = require("fs");
-const path = require("path");
 const { execSync } = require("child_process");
 
 const app = express();
@@ -10,25 +9,25 @@ const PORT = process.env.PORT || 3000;
 /* =========================
    Monitorização & Anti-Hibernação
 ========================= */
-const URL_DO_SEU_SITE = "https://seu-projeto.onrender.com"; 
+const URL_DO_SEU_SITE = "https://seu-projeto.onrender.com";
 setInterval(async () => {
   try {
     const res = await fetch(URL_DO_SEU_SITE);
-    if (res.ok) console.log(`[SYS_PING] Sonda orbital ativa. Telemetria retransmitida com sucesso.`);
+    if (res.ok) console.log("ping enviado, servidor acordado");
   } catch (err) {
-    console.log(`[SYS_ERR] Perda temporária de sinal: ${err.message}`);
+    console.log("falha no ping: " + err.message);
   }
 }, 600000);
 
-let totalRequests = 0; 
-const logsArray = [];  
-const ramHistory = []; 
+let totalRequests = 0;
+const logsArray = [];
+const ramHistory = [];
 
 const originalLog = console.log;
 console.log = function (...args) {
-  const time = new Date().toLocaleTimeString('pt-PT');
-  logsArray.unshift(`[${time}] > ${args.join(" ")}`); 
-  if (logsArray.length.toString() > 15) logsArray.pop(); 
+  const time = new Date().toLocaleTimeString("pt-PT");
+  logsArray.unshift(`[${time}] ${args.join(" ")}`);
+  if (logsArray.length > 15) logsArray.pop();
   originalLog.apply(console, args);
 };
 
@@ -36,16 +35,17 @@ app.use((req, res, next) => { totalRequests++; next(); });
 
 setInterval(() => {
   const percent = (((os.totalmem() - os.freemem()) / os.totalmem()) * 100).toFixed(0);
-  ramHistory.push({ time: new Date().toLocaleTimeString('pt-PT'), value: percent });
-  if (ramHistory.length > 25) ramHistory.shift(); 
+  ramHistory.push({ time: new Date().toLocaleTimeString("pt-PT"), value: percent });
+  if (ramHistory.length > 25) ramHistory.shift();
 }, 10000);
 
 /* =========================
-   Módulos de Extração de Dados
+   Extração de Dados
 ========================= */
 const toGB = (v) => (v / 1024 / 1024 / 1024).toFixed(2);
-const toMB = (v) => (v / 1024 / 1024).toFixed(2);
-const calcPercent = (p, t) => t ? ((p / t) * 100).toFixed(0) : "0";
+const toMB = (v) => (v / 1024 / 1024).toFixed(0);
+const calcPercent = (p, t) => (t ? ((p / t) * 100).toFixed(0) : "0");
+const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 
 function formatUptime(seconds) {
   const d = Math.floor(seconds / 86400), h = Math.floor((seconds % 86400) / 3600);
@@ -55,41 +55,61 @@ function formatUptime(seconds) {
 
 function getSystemData() {
   const cpus = os.cpus();
-  const avgCpu = (cpus.reduce((s, c) => s + Number(calcPercent(c.times.user + c.times.nice + c.times.sys + c.times.irq, c.times.user + c.times.nice + c.times.sys + c.times.idle + c.times.irq)), 0) / cpus.length).toFixed(0);
-  
-  let disk = { size: 'N/A', used: 'N/A', avail: 'N/A', percent: '0%' };
+  const avgCpu = (
+    cpus.reduce((s, c) => {
+      const busy = c.times.user + c.times.nice + c.times.sys + c.times.irq;
+      return s + Number(calcPercent(busy, busy + c.times.idle));
+    }, 0) / cpus.length
+  ).toFixed(0);
+
+  let disk = { size: "N/A", used: "N/A", avail: "N/A", percent: "0%" };
   try {
     const df = execSync("df -h / | tail -1").toString().trim().split(/\s+/);
     disk = { size: df[1], used: df[2], avail: df[3], percent: df[4] };
   } catch (e) {}
 
-  let git = { hash: 'N/A', branch: 'N/A', msg: 'Sem dados' };
+  let git = { hash: "N/A", branch: "N/A", msg: "sem dados" };
   try {
     git.hash = execSync("git rev-parse --short HEAD").toString().trim();
     git.branch = execSync("git rev-parse --abbrev-ref HEAD").toString().trim();
     git.msg = execSync("git log -1 --pretty=%B").toString().trim();
   } catch (e) {}
 
-  const ips = Object.values(os.networkInterfaces()).flat().filter(i => !i.internal && i.family === "IPv4");
+  const ips = Object.values(os.networkInterfaces()).flat().filter((i) => !i.internal && i.family === "IPv4");
   const mainIP = ips.length ? ips[0].address : "N/A";
 
   let files = [];
   try { files = fs.readdirSync(".").slice(0, 7); } catch (e) {}
 
-  const ramUsage = calcPercent(os.totalmem() - os.freemem(), os.totalmem());
-  const status = ramUsage > 85 ? { text: "CRÍTICO", color: "#ff003c" } : 
-                 (ramUsage > 65 ? { text: "SOBRECARGA", color: "#ffea00" } : 
-                 { text: "ESTÁVEL", color: "#00f0ff" });
+  const ramUsage = Number(calcPercent(os.totalmem() - os.freemem(), os.totalmem()));
+  const status =
+    ramUsage > 85 ? { text: "crítico", msg: "a memória está quase cheia. reinicia ou liberta recursos." }
+    : ramUsage > 65 ? { text: "sobrecarga", msg: "a memória está a subir. vale a pena vigiar." }
+    : { text: "estável", msg: "tudo a funcionar sem problemas." };
 
   return { cpus, avgCpu, disk, git, mainIP, files, ramUsage, status };
 }
 
 /* =========================
-   Geração da Interface HUD Avançada
+   Interface
 ========================= */
 app.get("/", (req, res) => {
   const data = getSystemData();
-  if (ramHistory.length === 0) ramHistory.push({ time: new Date().toLocaleTimeString('pt-PT'), value: data.ramUsage });
+  if (ramHistory.length === 0) ramHistory.push({ time: new Date().toLocaleTimeString("pt-PT"), value: data.ramUsage });
+
+  // arco de progresso à volta do vinil
+  const R = 330;
+  const C = 2 * Math.PI * R;
+  const arcLen = C * 0.62; // o arco ocupa 62% da circunferência quando RAM = 100%
+  const arcFill = (arcLen * data.ramUsage) / 100;
+
+  const cards = [
+    { k: data.avgCpu + "%", t: "processador", s: `${data.cpus.length} vcpus · ${os.arch()}` },
+    { k: data.disk.percent, t: "disco", s: `${data.disk.used} de ${data.disk.size} · livre ${data.disk.avail}` },
+    { k: "▶", t: "estado: " + data.status.text, s: `online há ${formatUptime(process.uptime())}`, active: true },
+    { k: String(totalRequests), t: "visitas ao site", s: `${toMB(process.memoryUsage().rss)} MB usados pelo node` },
+    { k: "git", t: data.git.branch, s: `commit ${data.git.hash}` },
+  ];
 
   res.send(`<!DOCTYPE html>
 <html lang="pt-PT">
@@ -97,298 +117,265 @@ app.get("/", (req, res) => {
 <meta charset="UTF-8">
 <meta http-equiv="refresh" content="10">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>HUD Tático Avançado | Comando Orbital</title>
+<title>${esc(os.hostname())} · painel</title>
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 <style>
-  @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;600;800;900&family=Share+Tech+Mono&display=swap');
-  
+  @import url('https://fonts.googleapis.com/css2?family=Lexend:wght@400;600;800&family=Quicksand:wght@500;600;700&display=swap');
+
   :root {
-    --bg-color: #020408;
-    --hud-cyan: #00f0ff;
-    --hud-cyan-dim: rgba(0, 240, 255, 0.12);
-    --hud-cyan-glow: 0 0 12px rgba(0, 240, 255, 0.4);
-    --hud-alert: #ff003c;
-    --hud-warn: #ffea00;
-    --text-color: #c5f0ff;
+    --page: #e9ebee;
+    --card: #ffffff;
+    --blue: #8fb0c1;
+    --blue-soft: #b4cde0;
+    --blue-pale: #d6e4ee;
+    --blue-ink: #6f95a9;
+    --gray: #eeeeef;
+    --gray-line: #dcdcde;
+    --text: #8a8a8e;
+    --text-strong: #5d6770;
   }
+
+  * { box-sizing: border-box; }
 
   body {
-    font-family: 'Share Tech Mono', monospace;
     margin: 0;
-    padding: 0;
-    background-color: var(--bg-color);
-    color: var(--text-color);
-    height: 100vh;
-    overflow: hidden;
-    text-transform: uppercase;
-    background-image: 
-      radial-gradient(circle at 50% 50%, rgba(0, 240, 255, 0.04) 0%, transparent 70%);
-  }
-
-  /* Scanlines e Radar de Fundo */
-  .scanlines {
-    position: fixed;
-    top: 0; left: 0; width: 100vw; height: 100vh;
-    background: linear-gradient(rgba(0,0,0,0) 50%, rgba(0,0,0,0.3) 50%);
-    background-size: 100% 4px;
-    pointer-events: none;
-    z-index: 999;
-  }
-
-  .radar-bg {
-    position: fixed;
-    top: 50%; left: 50%;
-    transform: translate(-50%, -50%);
-    width: 800px; height: 800px;
-    border: 1px dashed rgba(0, 240, 255, 0.05);
-    border-radius: 50%;
-    pointer-events: none;
-    z-index: 0;
-    animation: spin 60s linear infinite;
-  }
-  @keyframes spin { 100% { transform: translate(-50%, -50%) rotate(360deg); } }
-
-  /* Grelha Principal */
-  .hud-wrapper {
-    position: relative;
-    z-index: 2;
+    min-height: 100vh;
     display: grid;
-    grid-template-areas: 
-      "header header header"
-      "left center right"
-      "bottom bottom bottom";
-    grid-template-columns: 340px 1fr 340px;
-    grid-template-rows: auto 1fr 200px;
-    gap: 15px;
-    padding: 15px;
-    height: 100vh;
-    box-sizing: border-box;
+    place-items: center;
+    padding: 24px;
+    font-family: 'Quicksand', sans-serif;
+    font-weight: 600;
+    letter-spacing: .06em;
+    color: var(--text);
+    background-color: var(--page);
+    background-image: radial-gradient(rgba(0,0,0,.07) 1.2px, transparent 1.3px);
+    background-size: 22px 22px;
   }
 
-  header { 
-    grid-area: header; 
-    display: flex; 
-    justify-content: space-between; 
-    align-items: center; 
-    border-bottom: 2px solid var(--hud-cyan); 
-    padding-bottom: 8px;
-    background: linear-gradient(90deg, rgba(0,240,255,0.1), transparent);
-  }
-  header h1 { 
-    margin: 0; 
-    font-family: 'Orbitron', sans-serif;
-    font-size: 1.8em; 
-    color: var(--hud-cyan); 
-    text-shadow: var(--hud-cyan-glow); 
-    letter-spacing: 3px; 
-  }
-  header .status-box { 
-    background: ${data.status.color}; 
-    color: #000; 
-    padding: 6px 16px; 
-    font-family: 'Orbitron', sans-serif;
-    font-weight: 800; 
-    letter-spacing: 2px;
-    box-shadow: 0 0 10px ${data.status.color};
-  }
+  .tag { position: fixed; top: 14px; right: 24px; color: var(--blue-ink); font-weight: 700; font-size: 14px; }
 
-  /* Painéis Estilo Sci-Fi Tático */
-  .hud-panel {
-    background: rgba(2, 12, 27, 0.75);
-    border: 1px solid var(--hud-cyan);
-    padding: 15px;
-    clip-path: polygon(15px 0, 100% 0, 100% calc(100% - 15px), calc(100% - 15px) 100%, 0 100%, 0 15px);
+  .player {
     position: relative;
-    display: flex;
-    flex-direction: column;
-    box-shadow: inset 0 0 20px var(--hud-cyan-dim);
-  }
-
-  .hud-panel h2 { 
-    margin-top: 0; 
-    font-family: 'Orbitron', sans-serif;
-    font-size: 0.95em; 
-    color: var(--hud-cyan); 
-    border-bottom: 1px solid var(--hud-cyan-dim); 
-    padding-bottom: 6px; 
-    margin-bottom: 12px; 
-    letter-spacing: 2px;
-    display: flex;
-    justify-content: space-between;
-  }
-
-  .area-left { grid-area: left; }
-  .area-center { grid-area: center; display: flex; flex-direction: column; gap: 15px; }
-  .area-right { grid-area: right; }
-  .area-bottom { grid-area: bottom; }
-
-  /* Barras de Energia Estilo Futuristicas */
-  .energy-bar-container {
-    background: rgba(0, 240, 255, 0.1);
-    border: 1px solid var(--hud-cyan);
-    height: 10px;
-    width: 100%;
-    position: relative;
-    margin-top: 5px;
+    width: min(1180px, 100%);
+    height: min(720px, calc(100vh - 48px));
+    min-height: 620px;
+    background: var(--card);
+    border-radius: 56px;
+    box-shadow: 0 12px 40px rgba(60, 80, 100, .18);
     overflow: hidden;
-  }
-  .energy-bar-fill {
-    background: var(--hud-cyan);
-    height: 100%;
-    width: ${data.ramUsage}%;
-    box-shadow: var(--hud-cyan-glow);
-    transition: width 0.5s ease;
+    display: grid;
+    grid-template-columns: 420px 1fr 340px;
+    grid-template-rows: 110px 1fr;
+    column-gap: 28px;
+    padding: 0 48px 0 0;
   }
 
-  /* KPIs Centrais */
-  .kpi-target { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 15px; }
-  .kpi-item { 
-    border: 1px solid var(--hud-cyan); 
-    padding: 12px; 
-    text-align: center; 
-    background: rgba(0, 240, 255, 0.04);
-    position: relative;
+  /* navegação */
+  nav { grid-column: 2 / 3; grid-row: 1; display: flex; gap: 22px; align-items: flex-start; padding-top: 42px; font-size: 15px; }
+  nav span.on { color: var(--text-strong); position: relative; }
+  nav span.on::after { content: ""; position: absolute; left: 50%; bottom: -14px; width: 8px; height: 8px; margin-left: -4px; border-radius: 50%; background: var(--blue); }
+
+  .user { grid-column: 3 / 4; grid-row: 1; display: flex; justify-content: flex-end; align-items: center; gap: 14px; padding-top: 28px; text-align: right; font-size: 13px; color: var(--blue); }
+  .user b { display: block; color: var(--text); font-weight: 600; font-size: 14px; }
+  .avatar {
+    width: 74px; height: 74px; border-radius: 50%;
+    border: 5px solid var(--blue); background: #1b1d21; color: #fff;
+    display: grid; place-items: center; font-family: 'Lexend', sans-serif; font-weight: 600; font-size: 18px;
+    letter-spacing: 0;
   }
-  .kpi-item span { display: block; font-size: 0.75em; color: #7cb8cc; margin-bottom: 5px; letter-spacing: 1px; }
-  .kpi-item strong { font-family: 'Orbitron', sans-serif; font-size: 1.6em; color: var(--hud-cyan); text-shadow: var(--hud-cyan-glow); }
 
-  /* Listas de Dados */
-  .telemetry-list { list-style: none; padding: 0; margin: 0; flex: 1; }
-  .telemetry-list li { display: flex; justify-content: space-between; font-size: 0.85em; margin-bottom: 9px; border-bottom: 1px dotted rgba(0,240,255,0.1); padding-bottom: 4px; }
-  .telemetry-list li span:first-child { color: #699fb3; }
-  .telemetry-list li span:last-child { color: #fff; text-align: right; font-weight: bold; }
-
-  /* Terminal Estelar */
-  .terminal-output {
-    flex: 1;
-    overflow-y: auto;
-    font-size: 13px;
-    line-height: 1.4;
-    color: #00f0ff;
-    padding-right: 5px;
+  /* vinil */
+  .stage { grid-column: 1 / 2; grid-row: 1 / 3; position: relative; }
+  .arc { position: absolute; left: -330px; top: 80px; width: 700px; height: 700px; overflow: visible; }
+  .arc circle { fill: none; stroke-linecap: round; transform-origin: 350px 350px; transform: rotate(-135deg); }
+  .vinyl {
+    position: absolute; left: -330px; top: 106px; width: 650px; height: 650px; border-radius: 50%;
+    background:
+      radial-gradient(circle, #fff 0 9%, #0b0c0e 9.2% 100%),
+      repeating-radial-gradient(circle, #101114 0 2px, #1d1f23 3px 4px);
+    background-blend-mode: normal;
+    box-shadow: 0 10px 30px rgba(0,0,0,.25);
+    animation: spin 14s linear infinite;
   }
-  .log-line { border-left: 2px solid var(--hud-cyan); padding-left: 8px; margin-bottom: 3px; background: rgba(0,240,255,0.02); }
+  .vinyl::before { /* brilho */
+    content: ""; position: absolute; inset: 0; border-radius: 50%;
+    background: conic-gradient(from 20deg, transparent 0 10%, rgba(255,255,255,.28) 16%, transparent 24% 60%, rgba(255,255,255,.22) 68%, transparent 76%);
+  }
+  .vinyl::after { /* furo */
+    content: ""; position: absolute; left: 50%; top: 50%; width: 14px; height: 14px; margin: -7px; border-radius: 50%; background: #0b0c0e;
+  }
+  .vinyl-label {
+    position: absolute; left: -330px; top: 106px; width: 650px; height: 650px; display: grid; place-items: center; pointer-events: none;
+  }
+  .vinyl-label span {
+    position: relative; z-index: 2; width: 125px; height: 125px; border-radius: 50%; background: #fff;
+    display: grid; place-items: center; font-family: 'Lexend', sans-serif; font-weight: 800; font-size: 30px; color: var(--blue-ink); letter-spacing: 0;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
 
-  ::-webkit-scrollbar { width: 4px; }
-  ::-webkit-scrollbar-track { background: transparent; }
-  ::-webkit-scrollbar-thumb { background: var(--hud-cyan); }
+  .ctrl {
+    position: absolute; width: 56px; height: 56px; border-radius: 18px; background: var(--blue-soft);
+    display: grid; place-items: center; color: #fff; font-size: 18px;
+  }
+  .ctrl.play { left: 160px; bottom: 120px; width: 72px; height: 72px; border-radius: 24px; }
+  .ctrl.pause { left: 82px; bottom: 90px; }
 
-  .blink { animation: blinker 0.8s ease-in-out infinite alternate; }
-  @keyframes blinker { 0% { opacity: 1; } 100% { opacity: 0.3; } }
+  /* centro */
+  .center { grid-column: 2 / 3; grid-row: 2; position: relative; padding: 36px 0 0; }
+  .blob { position: absolute; border-radius: 50%; background: #f0f0f1; z-index: 0; }
+  .blob.a { width: 56px; height: 56px; left: -40px; top: -4px; }
+  .blob.b { width: 300px; height: 300px; left: -80px; top: 60px; }
+  .blob.c { width: 90px; height: 90px; right: 30px; top: 150px; }
+  .center > *:not(.blob) { position: relative; z-index: 1; }
+
+  h1, h2 { font-family: 'Lexend', sans-serif; margin: 0; letter-spacing: 0; }
+  .big { font-size: 64px; font-weight: 800; line-height: 1; color: var(--blue-soft); margin-top: 100px; }
+  .sub { font-style: italic; font-size: 17px; margin: 14px 0 28px; color: var(--text); }
+  .desc { max-width: 330px; font-size: 16px; line-height: 1.25; margin: 0 0 18px; }
+  .more { font-style: italic; color: var(--blue-soft); font-size: 16px; }
+
+  .bubble {
+    position: relative; margin-top: 34px; width: 250px; background: #fff; border-radius: 22px; padding: 18px 20px;
+    box-shadow: 0 2px 8px rgba(0,0,0,.14); font-family: 'Lexend', sans-serif; font-size: 13px; line-height: 1.3; color: var(--blue); letter-spacing: 0;
+  }
+  .bubble::before { content: ""; position: absolute; left: 0; top: -10px; width: 22px; height: 22px; background: #fff; border-radius: 0 100% 0 100%; transform: rotate(-90deg); }
+
+  .chart-box { margin-top: 16px; height: 120px; max-width: 420px; }
+
+  /* lista (direita) */
+  .side { grid-column: 3 / 4; grid-row: 2; padding-top: 24px; }
+  .side h2 { font-size: 40px; font-weight: 800; color: var(--blue-soft); margin-bottom: 26px; }
+  .item {
+    display: flex; align-items: center; gap: 16px; background: var(--gray); border-radius: 26px; padding: 14px 18px; margin-bottom: 14px;
+    border: 4px solid transparent;
+  }
+  .item.active { border-color: var(--blue-soft); background: #fff; box-shadow: 0 0 0 3px var(--blue-pale) inset; padding: 18px; margin: 18px -14px; }
+  .thumb {
+    flex: none; width: 62px; height: 62px; border-radius: 18px; background: linear-gradient(145deg, #2a2d33, #0f1013);
+    color: #fff; display: grid; place-items: center; font-family: 'Lexend', sans-serif; font-weight: 600; font-size: 17px; letter-spacing: 0;
+  }
+  .item.active .thumb { background: var(--blue-soft); }
+  .item .t { color: var(--text-strong); font-size: 15px; }
+  .item .s { color: var(--blue); font-size: 12px; margin-top: 2px; }
+  .foot { font-style: italic; font-size: 13px; line-height: 1.15; margin-top: 20px; }
+
+  /* registos (barra azul tipo pesquisa) */
+  .logs {
+    position: absolute; left: 130px; bottom: 36px; width: 580px; height: 130px; z-index: 5;
+    background: var(--blue); border-radius: 36px; padding: 16px 24px 16px 84px; box-shadow: 0 6px 20px rgba(60,80,100,.25);
+  }
+  .logs .mag {
+    position: absolute; left: 30px; top: 22px; width: 30px; height: 30px; border: 4px solid #fff; border-radius: 50%;
+  }
+  .logs .mag::after { content: ""; position: absolute; width: 4px; height: 14px; background: #fff; right: -7px; bottom: -11px; transform: rotate(-45deg); border-radius: 2px; }
+  .logs .lines {
+    height: 100%; overflow-y: auto; background: #fff; border-radius: 24px; padding: 10px 18px; font-size: 12px; font-style: italic; line-height: 1.5; color: var(--text);
+  }
+  .logs .lines div { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .logs .close {
+    position: absolute; right: -34px; top: -20px; width: 64px; height: 64px; border-radius: 50%; background: #f1f1f2; color: var(--text);
+    display: grid; place-items: center; font-family: 'Lexend', sans-serif; font-weight: 800; font-size: 20px; box-shadow: 0 2px 8px rgba(0,0,0,.12);
+  }
+  ::-webkit-scrollbar { width: 5px; }
+  ::-webkit-scrollbar-thumb { background: var(--blue-soft); border-radius: 4px; }
+
+  /* mobile / ecrãs pequenos */
+  @media (max-width: 1000px) {
+    body { padding: 12px; place-items: start center; }
+    .player { height: auto; grid-template-columns: 1fr; grid-template-rows: auto; padding: 0 22px 150px; border-radius: 36px; }
+    nav, .user, .stage, .center, .side { grid-column: 1; grid-row: auto; }
+    nav { flex-wrap: wrap; padding-top: 28px; }
+    .user { justify-content: flex-start; padding-top: 18px; text-align: left; }
+    .stage { height: 300px; margin: 10px -22px 0; overflow: hidden; }
+    .arc, .vinyl, .vinyl-label { left: -300px; top: -60px; }
+    .ctrl { display: none; }
+    .big { margin-top: 20px; font-size: 48px; }
+    .side { padding-top: 10px; }
+    .item.active { margin: 14px 0; }
+    .logs { left: 22px; right: 22px; width: auto; bottom: 22px; }
+    .logs .close { display: none; }
+    .tag { display: none; }
+  }
+  @media (prefers-reduced-motion: reduce) { .vinyl { animation: none; } }
 </style>
 </head>
 <body>
-  
-  <div class="scanlines"></div>
-  <div class="radar-bg"></div>
+  <div class="tag">@${esc(os.hostname())}</div>
 
-  <div class="hud-wrapper">
-    <!-- Cabeçalho -->
-    <header>
+  <main class="player">
+    <nav>
+      <span>home</span><span>hardware</span><span>rede</span><span>ficheiros</span><span class="on">painel</span>
+    </nav>
+
+    <div class="user">
       <div>
-        <h1>ORBITAL.SYS // v3.0</h1>
-        <div style="font-size: 0.75em; color: #699fb3; margin-top: 2px;">TIMESTAMP: ${new Date().toLocaleTimeString('pt-PT')} | UPTIME: ${formatUptime(process.uptime())}</div>
+        <b>@${esc(os.hostname())}</b>
+        ${esc(data.mainIP)} · node ${esc(process.version)}
       </div>
-      <div class="status-box ${data.ramUsage > 85 ? 'blink' : ''}">ESTADO: ${data.status.text}</div>
-    </header>
-
-    <!-- Coluna Esquerda: Hardware -->
-    <div class="hud-panel area-left">
-      <h2><span>[ NÚCLEO FÍSICO ]</span> <span>HARDWARE</span></h2>
-      <ul class="telemetry-list">
-        <li><span>CPU:</span> <span>${data.cpus[0].model.substring(0, 16)}...</span></li>
-        <li><span>VCPUS ATIVOS:</span> <span>${data.cpus.length}</span></li>
-        <li><span>ARQ:</span> <span>${os.arch()}</span></li>
-        <li><span>RAM TOTAL:</span> <span>${toGB(os.totalmem())} GB</span></li>
-        <li><span>RSS (NODE):</span> <span>${toMB(process.memoryUsage().rss)} MB</span></li>
-        <li style="margin-top: 10px; border-top: 1px solid var(--hud-cyan); padding-top: 5px;"><span>DISCO TOTAL:</span> <span>${data.disk.size}</span></li>
-        <li><span>DISCO USADO:</span> <span>${data.disk.used} (${data.disk.percent})</span></li>
-        <li><span>DISCO LIVRE:</span> <span>${data.disk.avail}</span></li>
-      </ul>
+      <div class="avatar">${data.avgCpu}%</div>
     </div>
 
-    <!-- Coluna Central: Alvo Principal (Gráfico e KPIs) -->
-    <div class="area-center">
-      <div class="kpi-target">
-        <div class="kpi-item">
-          <span>MOTOR CPU</span>
-          <strong>${data.avgCpu}%</strong>
-        </div>
-        <div class="kpi-item">
-          <span>MEMÓRIA RAM</span>
-          <strong>${data.ramUsage}%</strong>
-          <div class="energy-bar-container"><div class="energy-bar-fill"></div></div>
-        </div>
-        <div class="kpi-item">
-          <span>TRÁFEGO WEB</span>
-          <strong>${totalRequests}</strong>
-        </div>
-      </div>
-      
-      <div class="hud-panel" style="flex: 1;">
-        <h2><span>[ TELEMETRIA AO VIVO ]</span> <span>ESPECTRO DE RAM</span></h2>
-        <div style="flex: 1; min-height: 160px; position: relative;">
-          <canvas id="ramChart"></canvas>
-        </div>
-      </div>
+    <!-- vinil: o arco mostra o uso de RAM -->
+    <div class="stage">
+      <svg class="arc" viewBox="0 0 700 700" aria-hidden="true">
+        <circle cx="350" cy="350" r="${R}" stroke="#dedede" stroke-width="14" stroke-dasharray="${arcLen} ${C}"/>
+        <circle cx="350" cy="350" r="${R}" stroke="var(--blue)" stroke-width="14" stroke-dasharray="${arcFill} ${C}"/>
+      </svg>
+      <div class="vinyl"></div>
+      <div class="vinyl-label"><span>${data.ramUsage}%</span></div>
+      <div class="ctrl pause">❚❚</div>
+      <div class="ctrl play">▶</div>
     </div>
 
-    <!-- Coluna Direita: Ambiente, Git e Ficheiros -->
-    <div class="hud-panel area-right">
-      <h2><span>[ AMBIENTE & REDE ]</span> <span>INFRA</span></h2>
-      <ul class="telemetry-list">
-        <li><span>SO:</span> <span>${os.type()}</span></li>
-        <li><span>HOSTNAME:</span> <span>${os.hostname()}</span></li>
-        <li><span>IP:</span> <span>${data.mainIP}</span></li>
-        <li><span>NODE:</span> <span>v${process.version}</span></li>
-        <li><span>BRANCH:</span> <span>${data.git.branch}</span></li>
-        <li><span>COMMIT:</span> <span>${data.git.hash}</span></li>
-      </ul>
+    <section class="center">
+      <i class="blob a"></i><i class="blob b"></i><i class="blob c"></i>
+      <h1 class="big">Memória</h1>
+      <div class="sub">uso de ram · ${toGB(os.totalmem())} gb no total</div>
+      <p class="desc">${esc(data.git.msg.split("\n")[0])}. Último commit na branch ${esc(data.git.branch)}, ficheiros na raiz: ${data.files.map(esc).join(", ") || "nenhum"}.</p>
+      <span class="more">ver mais..</span>
+      <div class="bubble">${esc(data.status.msg)}</div>
+      <div class="chart-box"><canvas id="ramChart"></canvas></div>
+    </section>
 
-      <h2 style="margin-top: 10px;"><span>[ DIRETÓRIO ]</span> <span>RAIZ</span></h2>
-      <ul class="telemetry-list" style="font-size: 0.75em; color: var(--hud-cyan);">
-        ${data.files.map(f => `<li><span>FILE:</span> <span>${f}</span></li>`).join("") || "<li>VAZIO</li>"}
-      </ul>
-    </div>
+    <aside class="side">
+      <h2>Sistema</h2>
+      ${cards.map((c) => `
+      <div class="item ${c.active ? "active" : ""}">
+        <div class="thumb">${esc(c.k)}</div>
+        <div><div class="t">${esc(c.t)}</div><div class="s">${esc(c.s)}</div></div>
+      </div>`).join("")}
+      <div class="foot">atualiza sozinho a cada 10 segundos.<br>se algo falhar, vê os registos abaixo.</div>
+    </aside>
 
-    <!-- Base: Terminal Horizontal -->
-    <div class="hud-panel area-bottom">
-      <h2><span>[ REGISTOS DE EVENTOS ]</span> <span class="blink">TERMINAL ATIVO</span></h2>
-      <div class="terminal-output">
-        ${logsArray.length > 0 ? logsArray.map(log => `<div class="log-line">${log}</div>`).join("") : '<div class="log-line">A AGUARDAR FLUXO DE DADOS...</div>'}
+    <div class="logs">
+      <i class="mag"></i>
+      <div class="lines">
+        ${logsArray.length ? logsArray.map((l) => `<div>${esc(l)}</div>`).join("") : "<div>a aguardar eventos...</div>"}
       </div>
+      <div class="close">×</div>
     </div>
-  </div>
+  </main>
 
   <script>
-    Chart.defaults.color = '#699fb3';
-    Chart.defaults.font.family = "'Share Tech Mono', monospace";
-    
-    const ctx = document.getElementById('ramChart').getContext('2d');
+    Chart.defaults.color = '#8a8a8e';
+    Chart.defaults.font.family = "'Quicksand', sans-serif";
     const history = ${JSON.stringify(ramHistory)};
-    new Chart(ctx, {
+    new Chart(document.getElementById('ramChart').getContext('2d'), {
       type: 'line',
       data: {
         labels: history.map(h => h.time),
         datasets: [{
-          label: 'RAM (%)',
           data: history.map(h => h.value),
-          borderColor: '#00f0ff',
-          backgroundColor: 'rgba(0, 240, 255, 0.15)',
-          borderWidth: 2, 
-          tension: 0.2, 
-          fill: true, 
-          pointRadius: 2,
-          pointBackgroundColor: '#00f0ff'
+          borderColor: '#8fb0c1',
+          backgroundColor: 'rgba(180, 205, 224, 0.35)',
+          borderWidth: 3, tension: 0.35, fill: true, pointRadius: 0
         }]
       },
-      options: { 
-        responsive: true, 
-        maintainAspectRatio: false, 
-        animation: false,
-        scales: { 
-          y: { beginAtZero: true, max: 100, grid: { color: 'rgba(0, 240, 255, 0.1)' }, border: { dash: [3, 3] } },
-          x: { grid: { color: 'rgba(0, 240, 255, 0.05)' }, ticks: { display: false } } 
+      options: {
+        responsive: true, maintainAspectRatio: false, animation: false,
+        scales: {
+          y: { beginAtZero: true, max: 100, grid: { color: 'rgba(0,0,0,0.05)' }, border: { display: false }, ticks: { stepSize: 50 } },
+          x: { grid: { display: false }, ticks: { display: false }, border: { display: false } }
         },
         plugins: { legend: { display: false } }
       }
@@ -398,4 +385,4 @@ app.get("/", (req, res) => {
 </html>`);
 });
 
-app.listen(PORT, () => console.log("Interface HUD Avançada pronta na porta " + PORT));
+app.listen(PORT, () => console.log("painel pronto na porta " + PORT));
