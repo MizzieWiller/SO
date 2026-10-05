@@ -1,4 +1,4 @@
-const express = require("express");
+cconst express = require("express");
 const os = require("os");
 const fs = require("fs");
 const path = require("path");
@@ -17,10 +17,10 @@ setInterval(async () => {
   try {
     const response = await fetch(URL_DO_SEU_SITE);
     if (response.ok) {
-      console.log(`[🛰️ Sonda] Sinal de vida enviado. A estação orbital continua ativa e em órbita.`);
+      console.log(`[🛰️ Sonda] Sinal de vida enviado. A órbita permanece estável e sem anomalias.`);
     }
   } catch (error) {
-    console.log(`[☄️ Alerta] Falha na comunicação com a sonda: ${error.message}`);
+    console.log(`[☄️ Alerta] Chuva de meteoros detectada: Falha na comunicação com a sonda (${error.message})`);
   }
 }, INTERVALO_PING);
 
@@ -33,7 +33,7 @@ const ramHistory = [];
 
 const originalLog = console.log;
 console.log = function (...args) {
-  const time = new Date().toLocaleTimeString('pt-PT');
+  const time = new Date().toLocaleTimeString('pt-BR');
   const msg = `[${time}] ${args.join(" ")}`;
   logsArray.unshift(msg); 
   if (logsArray.length > 20) logsArray.pop(); 
@@ -49,11 +49,26 @@ setInterval(() => {
   const total = os.totalmem();
   const free = os.freemem();
   const percent = (((total - free) / total) * 100).toFixed(0);
-  const time = new Date().toLocaleTimeString('pt-PT');
+  const time = new Date().toLocaleTimeString('pt-BR');
   
   ramHistory.push({ time, value: percent });
   if (ramHistory.length > 15) ramHistory.shift(); 
 }, 10000);
+
+/* =========================
+   Banco de Curiosidades Cósmicas
+========================= */
+const curiosidades = [
+  "Um dia em Vênus é mais longo do que um ano venusiano.",
+  "A luz do Sol demora cerca de 8 minutos e 20 segundos para chegar à Terra. Se o Sol apagasse, só saberíamos depois desse tempo!",
+  "O espaço é completamente silencioso porque não há ar para as ondas sonoras viajarem.",
+  "Existem mais estrelas no universo observável do que grãos de areia em todas as praias do nosso planeta.",
+  "As pegadas deixadas pelos astronautas na Lua vão durar milhões de anos, pois lá não há vento para apagá-las.",
+  "Um buraco negro tem uma gravidade tão intensa que nem a luz escapa (mas esperamos que os seus dados escapem!).",
+  "Estima-se que chovam diamantes em Júpiter e Saturno devido à extrema pressão atmosférica.",
+  "Se duas peças do mesmo tipo de metal se tocarem no espaço, elas se fundirão permanentemente (soldagem a frio).",
+  "Júpiter é tão massivo que todos os outros planetas do sistema solar caberiam dentro dele."
+];
 
 /* =========================
    Módulos de Telemetria
@@ -67,7 +82,7 @@ function formatUptime(seconds) {
   const h = Math.floor((seconds % 86400) / 3600);
   const m = Math.floor((seconds % 3600) / 60);
   const s = Math.floor(seconds % 60);
-  return `${d}d ${h}h ${m}m ${s}s`;
+  return `${d} Ciclos Solares, ${h}h ${m}m ${s}s`;
 }
 
 function getIPs() {
@@ -83,7 +98,7 @@ function getIPs() {
 
 function getMainIP(ips) {
   const ip = ips.find(i => !i.internal && i.family === "IPv4");
-  return ip ? ip.address : "N/A";
+  return ip ? ip.address : "Espaço Profundo (Desconhecido)";
 }
 
 function getFilesDetailed() {
@@ -92,7 +107,7 @@ function getFilesDetailed() {
       const stat = fs.statSync(path.join(".", file));
       return {
         name: file,
-        type: stat.isDirectory() ? "Dir" : "Ficheiro",
+        type: stat.isDirectory() ? "Módulo" : "Documento",
         size: stat.isDirectory() ? "-" : `${(stat.size / 1024).toFixed(2)} KB`
       };
     });
@@ -117,7 +132,7 @@ function getGitInfo() {
     const msg = execSync("git log -1 --pretty=%B").toString().trim();
     return { hash, branch, msg };
   } catch (e) {
-    return { hash: 'N/A', branch: 'N/A', msg: 'Sem repositório local' };
+    return { hash: 'N/A', branch: 'N/A', msg: 'Sem diário de bordo local' };
   }
 }
 
@@ -131,9 +146,9 @@ function cpuStats() {
 }
 
 function healthStatus(ramUsage, loadAvg, cores) {
-  if (ramUsage > 85 || loadAvg > cores) return { label: "PERIGO CRÍTICO", color: "#ef4444", glow: "rgba(239, 68, 68, 0.6)" };
-  if (ramUsage > 65 || loadAvg > cores * 0.7) return { label: "ALERTA AMARELO", color: "#eab308", glow: "rgba(234, 179, 8, 0.6)" };
-  return { label: "SISTEMAS ESTÁVEIS", color: "#06b6d4", glow: "rgba(6, 182, 212, 0.6)" };
+  if (ramUsage > 85 || loadAvg > cores) return { label: "PERIGO: COLAPSO IMINENTE", color: "#ef4444", glow: "rgba(239, 68, 68, 0.6)" };
+  if (ramUsage > 65 || loadAvg > cores * 0.7) return { label: "ALERTA AMARELO: TURBULÊNCIA", color: "#eab308", glow: "rgba(234, 179, 8, 0.6)" };
+  return { label: "SISTEMAS ESTÁVEIS: NAVEGANDO", color: "#06b6d4", glow: "rgba(6, 182, 212, 0.6)" };
 }
 
 /* =========================
@@ -158,9 +173,10 @@ app.get("/", (req, res) => {
   const user = os.userInfo();
   const uptime = os.uptime();
   const health = healthStatus(ramPercent, load[0], cpuCount);
+  const curiosidadeAtiva = curiosidades[Math.floor(Math.random() * curiosidades.length)];
 
   if (ramHistory.length === 0) {
-    ramHistory.push({ time: new Date().toLocaleTimeString('pt-PT'), value: ramPercent });
+    ramHistory.push({ time: new Date().toLocaleTimeString('pt-BR'), value: ramPercent });
   }
 
   res.send(`
@@ -170,7 +186,7 @@ app.get("/", (req, res) => {
 <meta charset="UTF-8">
 <meta http-equiv="refresh" content="10">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>🌌 Centro de Comando</title>
+<title>🌌 Centro de Comando Orbital</title>
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700&family=Space+Mono:ital,wght@0,400;0,700;1,400&display=swap');
@@ -230,14 +246,14 @@ b { color: #f8fafc; font-family: 'Nunito', sans-serif;}
 <body>
 
 <h1>🚀 Centro de Comando Orbital 🚀</h1>
-<div class="subtitle">Sincronização estelar concluída às: ${new Date().toLocaleTimeString('pt-PT')}</div>
+<div class="subtitle">Sincronização estelar concluída às: ${new Date().toLocaleTimeString('pt-BR')}</div>
 
 <!-- KPIs -->
 <div class="top-grid">
   <div class="card kpi"><h3>🌑 Matéria Escura (RAM)</h3><div class="value">${ramPercent}%</div></div>
-  <div class="card kpi"><h3>☄️ Núcleo Propulsor</h3><div class="value">${avgCpu}%</div></div>
-  <div class="card kpi"><h3>🛸 Sondas Intercetadas</h3><div class="value">${totalRequests}</div></div>
-  <div class="card kpi"><h3>⏳ Tempo de Missão</h3><div class="value" style="font-size: 16px;">${formatUptime(process.uptime())}</div></div>
+  <div class="card kpi"><h3>☄️ Velocidade de Dobra</h3><div class="value">${avgCpu}%</div></div>
+  <div class="card kpi"><h3>🛸 Sondas Interceptadas</h3><div class="value">${totalRequests}</div></div>
+  <div class="card kpi"><h3>⏳ Tempo de Missão</h3><div class="value" style="font-size: 14px;">${formatUptime(process.uptime())}</div></div>
   <div class="card kpi" style="border-color: ${health.color}; box-shadow: 0 0 15px ${health.glow};">
     <h3 style="color: ${health.color};">Integridade do Casco</h3>
     <div class="value"><span class="badge" style="background:${health.color};">${health.label}</span></div>
@@ -245,6 +261,12 @@ b { color: #f8fafc; font-family: 'Nunito', sans-serif;}
 </div>
 
 <div class="grid">
+
+<!-- Bloco Curiosidade Aleatória -->
+<div class="card" style="grid-column: 1 / -1; border-color: rgba(167, 139, 250, 0.5); background: rgba(88, 28, 135, 0.2);">
+  <h2 style="color: #c084fc;">🔭 Transmissão Astronômica Descodificada</h2>
+  <p style="font-size: 1.1em; font-style: italic; color: #e9d5ff;">"${curiosidadeAtiva}"</p>
+</div>
 
 <!-- Bloco: Sistema -->
 <div class="card">
@@ -254,20 +276,20 @@ b { color: #f8fafc; font-family: 'Nunito', sans-serif;}
   <p><b>Kernel (OS):</b> ${os.release()}</p>
 </div>
 
-<!-- Bloco: Identificação -->
+<!-- Bloco: Identificação (Personalizado) -->
 <div class="card">
   <h2>👨‍🚀 Credenciais de Piloto</h2>
-  <p><b>Designação:</b> ${os.hostname()}</p>
   <p><b>Comandante:</b> ${user.username}</p>
-  <p><b>Alojamentos:</b> ${os.homedir()}</p>
+  <p><b>Base de Lançamento:</b> Fatec Itapetininga</p>
+  <p><b>Diretriz (Missão):</b> Análise e Des. de Sistemas</p>
 </div>
 
 <!-- Bloco: CPU -->
 <div class="card">
   <h2>⚙️ Reatores Principais (CPU)</h2>
   <p><b>Arquitetura:</b> <span class="code-inline">${os.arch()}</span></p>
-  <p><b>Cilindros (Cores):</b> ${cpuCount}</p>
-  <p><b>Motor:</b> ${cpus[0].model}</p>
+  <p><b>Cilindros Quânticos:</b> ${cpuCount}</p>
+  <p><b>Motor de Propulsão:</b> ${cpus[0].model}</p>
 </div>
 
 <!-- Bloco: Carga -->
@@ -280,10 +302,10 @@ b { color: #f8fafc; font-family: 'Nunito', sans-serif;}
 
 <!-- Bloco: Memória Servidor -->
 <div class="card">
-  <h2>🌌 Reservas de Matéria (Servidor)</h2>
+  <h2>🌌 Reservas de Matéria (Host)</h2>
   <p><b>Capacidade Total:</b> ${gb(total)} GB</p>
-  <p><b>Vácuo (Livre):</b> ${gb(free)} GB</p>
-  <p><b>Massa (Em Uso):</b> ${gb(used)} GB</p>
+  <p><b>Vácuo Absoluto (Livre):</b> ${gb(free)} GB</p>
+  <p><b>Massa Densa (Em Uso):</b> ${gb(used)} GB</p>
 </div>
 
 <!-- Bloco: Memória Node -->
@@ -310,40 +332,40 @@ b { color: #f8fafc; font-family: 'Nunito', sans-serif;}
 
 <!-- Bloco: Conectividade -->
 <div class="card">
-  <h2>📡 Comunicações de Rede</h2>
+  <h2>📡 Comunicações Via Láctea</h2>
   <p><b>Frequência IP:</b> ${mainIP}</p>
-  <p><b>Canais Abertos:</b> ${ips.length}</p>
+  <p><b>Canais de Rádio Abertos:</b> ${ips.length}</p>
 </div>
 
 <!-- Bloco: Node & Dir -->
 <div class="card">
-  <h2>🟩 Ambiente Espacial (Node)</h2>
+  <h2>🟩 Atmosfera Artificial (Node)</h2>
   <p><b>Versão do Sistema:</b> ${process.version}</p>
   <p><b>Coordenadas:</b> <span class="code-inline">${__dirname}</span></p>
-  <p><b>Atmosfera (ENV):</b> <span class="code-inline">${process.env.NODE_ENV || 'Padrão'}</span></p>
+  <p><b>Pressão (ENV):</b> <span class="code-inline">${process.env.NODE_ENV || 'Padrão'}</span></p>
 </div>
 
 <!-- Bloco: Disco -->
 <div class="card">
-  <h2>💽 Baia de Carga (Disco)</h2>
-  <p><b>Volume Total:</b> ${disk.size}</p>
-  <p><b>Carga Ocupada:</b> ${disk.used} (${disk.percent})</p>
-  <p><b>Espaço Livre:</b> ${disk.avail}</p>
+  <h2>💽 Buraco Negro (Disco)</h2>
+  <p><b>Volume Espacial:</b> ${disk.size}</p>
+  <p><b>Massa Sugada:</b> ${disk.used} (${disk.percent})</p>
+  <p><b>Espaço Sobrevivente:</b> ${disk.avail}</p>
 </div>
 
 <!-- Bloco: Git -->
 <div class="card">
-  <h2>🐙 Registo de Saltos (Git)</h2>
-  <p><b>Rota (Branch):</b> ${git.branch}</p>
-  <p><b>Salto (Commit):</b> <span class="code-inline">${git.hash}</span></p>
-  <p><b>Transmissão:</b> <span style="color:#94a3b8;">"${git.msg}"</span></p>
+  <h2>🐙 Registro de Saltos (Git)</h2>
+  <p><b>Rota Quântica (Branch):</b> ${git.branch}</p>
+  <p><b>Ponto de Salto (Commit):</b> <span class="code-inline">${git.hash}</span></p>
+  <p><b>Mensagem:</b> <span style="color:#94a3b8;">"${git.msg}"</span></p>
 </div>
 
 <!-- Bloco: Arquivos Locais -->
 <div class="card" style="grid-column: 1 / -1;">
-  <h2>📂 Registos de Bordo (Raiz Top 10)</h2>
+  <h2>📂 Registros de Bordo (Raiz Top 10)</h2>
   <table>
-    <tr><th>Nome do Ficheiro</th><th>Classificação</th><th>Tamanho</th></tr>
+    <tr><th>Nome do Arquivo</th><th>Classificação</th><th>Tamanho</th></tr>
     ${files.map(f => `<tr><td>${f.name}</td><td>${f.type}</td><td>${f.size}</td></tr>`).join("")}
   </table>
 </div>
@@ -356,13 +378,13 @@ b { color: #f8fafc; font-family: 'Nunito', sans-serif;}
 
 <!-- Terminal -->
 <div class="card" style="grid-column: 1 / -1;">
-  <h2>>_ Consola de Navegação (Logs)</h2>
-  <div class="terminal">${logsArray.length > 0 ? logsArray.join("<br>") : "A aguardar transmissões intergalácticas..."}</div>
+  <h2>>_ Console de Navegação (Logs)</h2>
+  <div class="terminal">${logsArray.length > 0 ? logsArray.join("<br>") : "Aguardando transmissões intergalácticas da frota..."}</div>
 </div>
 
 </div>
 
-<div class="subtitle" style="margin-top: 40px; color: #475569;">Centro de Comando Orbital • Sincronização a cada 10s ☄️</div>
+<div class="subtitle" style="margin-top: 40px; color: #475569;">Centro de Comando Orbital • Sincronização automática a cada 10s ☄️</div>
 
 <script>
   Chart.defaults.color = '#94a3b8';
@@ -407,6 +429,6 @@ b { color: #f8fafc; font-family: 'Nunito', sans-serif;}
 });
 
 app.listen(PORT, () => {
-  console.log("Motores ligados na porta " + PORT);
-  console.log("🚀 Prontos para a descolagem...");
+  console.log("Motores de dobra ligados na porta " + PORT);
+  console.log("🚀 Prontos para a decolagem...");
 });
