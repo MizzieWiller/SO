@@ -19,32 +19,46 @@ function formatarTempo(segundosIniciais) {
 }
 
 app.get('/', (req, res) => {
-  // 1. Processamento e CPU
+  // 1. Processamento e Desempenho
   const cpus = os.cpus();
-  const modeloCPU = cpus[0].model;
+  const modeloCPU = cpus.length > 0 ? cpus[0].model : 'Desconhecido';
+  const loadAvg = os.loadavg(); // Média de carga: [1 min, 5 min, 15 min]
 
-  // 2. Memória
+  // 2. Memória RAM
   const memTotal = Math.round(os.totalmem() / 1024 / 1024);
   const memLivre = Math.round(os.freemem() / 1024 / 1024);
   const memEmUso = memTotal - memLivre;
   const porcentagemUso = Math.round((memEmUso / memTotal) * 100);
+  
+  // Memória usada apenas pelo processo Node.js
+  const nodeRAM = Math.round(process.memoryUsage().rss / 1024 / 1024);
 
-  // 3. Tempos convertidos
-  const tempoSO = formatarTempo(os.uptime());
-  const tempoNode = formatarTempo(process.uptime());
+  // 3. Status Geral Lógico
+  let statusGeral = "🟢 Saudável";
+  let corStatus = "#10b981"; // Verde
+  if (porcentagemUso > 90) {
+    statusGeral = "🔴 Crítico";
+    corStatus = "#ef4444"; // Vermelho
+  } else if (porcentagemUso > 75) {
+    statusGeral = "🟡 Atenção";
+    corStatus = "#f59e0b"; // Amarelo
+  }
 
-  // 4. Rede
+  // 4. Rede e IP Principal
   const redes = os.networkInterfaces();
   let ips = [];
+  let ipPrincipal = "Desconhecido";
   for (const interfaceNome in redes) {
     redes[interfaceNome].forEach(rede => {
       if (!rede.internal && rede.family === 'IPv4') {
         ips.push(`${interfaceNome}: ${rede.address}`);
+        if (ipPrincipal === "Desconhecido") ipPrincipal = rede.address;
       }
     });
   }
 
-  // 5. Arquivos do diretório
+  // 5. Sistema e Arquivos
+  const kernel = os.release();
   let arquivos = [];
   try {
       arquivos = fs.readdirSync(__dirname).join(', ');
@@ -52,28 +66,28 @@ app.get('/', (req, res) => {
       arquivos = "Erro ao ler arquivos";
   }
 
-  const usuarioInfo = os.userInfo().username;
+  // Tempos
+  const tempoSO = formatarTempo(os.uptime());
+  const tempoNode = formatarTempo(process.uptime());
 
-  // Renderização da interface com HTML e CSS
   res.send(`
     <html>
     <head>
       <meta charset="utf-8">
-      <title>Monitor de Sistemas</title>
+      <title>Dashboard do Servidor</title>
       <meta name="viewport" content="width=device-width, initial-scale=1.0">
       <style>
-        /* Importando fontes do Google para o texto e estilo "escrito à mão" dos post-its */
         @import url('https://fonts.googleapis.com/css2?family=Kalam:wght@400;700&family=Nunito:wght@400;700&display=swap');
         
         body { 
           font-family: 'Nunito', sans-serif; 
-          background-color: #faf5ff; /* Fundo roxo muito claro */
+          background-color: #faf5ff; 
           margin: 0; 
           padding: 30px; 
           color: #3b2163; 
         }
         
-        /* BARRA SUPERIOR (RESUMO) */
+        /* BARRA SUPERIOR */
         .summary-bar {
           background: linear-gradient(135deg, #8b5cf6, #6d28d9);
           color: white;
@@ -97,28 +111,28 @@ app.get('/', (req, res) => {
           margin-bottom: 5px;
         }
         .summary-item strong { font-size: 1.5em; }
+        
+        /* Cor dinâmica para o Status */
+        .status-badge { color: ${corStatus}; font-weight: bold; text-shadow: 1px 1px 2px rgba(0,0,0,0.5); }
 
-        /* GRID PARA OS POST-ITS */
+        /* GRID POST-ITS */
         .grid-container {
           display: grid;
-          grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+          grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
           gap: 30px;
           padding: 10px;
         }
 
-        /* ESTILO DOS POST-ITS */
         .post-it {
-          background-color: #f3e8ff; /* Cor do papel: roxo bem claro */
+          background-color: #f3e8ff; 
           padding: 25px;
-          /* Borda arredondada com um leve defeito para imitar papel real */
           border-radius: 2px 15px 15px 15px;
           box-shadow: 3px 5px 15px rgba(109, 40, 217, 0.15);
-          font-family: 'Kalam', cursive; /* Fonte imitando caneta */
+          font-family: 'Kalam', cursive; 
           position: relative;
           transition: transform 0.2s ease, box-shadow 0.2s ease;
         }
         
-        /* Efeito visual da ponta dobrada do post-it */
         .post-it::after {
           content: '';
           position: absolute;
@@ -130,16 +144,9 @@ app.get('/', (req, res) => {
           box-shadow: 2px 2px 2px rgba(0,0,0,0.05);
         }
 
-        /* Rotação alternada para dar um aspecto desorganizado na parede */
         .post-it:nth-child(odd) { transform: rotate(-1.5deg); }
         .post-it:nth-child(even) { transform: rotate(1.5deg); }
-        
-        /* Efeito ao passar o mouse */
-        .post-it:hover { 
-          transform: scale(1.05) rotate(0deg); 
-          z-index: 10; 
-          box-shadow: 5px 8px 20px rgba(109, 40, 217, 0.3);
-        }
+        .post-it:hover { transform: scale(1.05) rotate(0deg); z-index: 10; box-shadow: 5px 8px 20px rgba(109, 40, 217, 0.3); }
 
         .post-it h3 { 
           color: #5b21b6; 
@@ -147,74 +154,73 @@ app.get('/', (req, res) => {
           padding-bottom: 5px; 
           margin-top: 0; 
           font-family: 'Nunito', sans-serif;
-          font-weight: 700;
         }
         .post-it p { margin: 8px 0; font-size: 1.1em; color: #2e1065; }
+        .code-inline { background: #e9d5ff; padding: 2px 6px; border-radius: 4px; font-family: monospace; font-size: 0.9em; }
       </style>
     </head>
     <body>
       
-      <!-- Barra Superior -->
       <div class="summary-bar">
         <div class="summary-item">
-          <span>Status</span>
-          <strong>Online 🚀</strong>
+          <span>Status Geral</span>
+          <strong class="status-badge">${statusGeral}</strong>
+        </div>
+        <div class="summary-item">
+          <span>IP Principal</span>
+          <strong>${ipPrincipal}</strong>
         </div>
         <div class="summary-item">
           <span>Uso de RAM</span>
           <strong>${porcentagemUso}%</strong>
         </div>
         <div class="summary-item">
-          <span>Uptime Máquina</span>
-          <strong>${tempoSO}</strong>
-        </div>
-        <div class="summary-item">
           <span>Provedor</span>
-          <strong>${process.env.RENDER_SERVICE_ID ? 'Render' : 'Local'}</strong>
+          <strong>${process.env.RENDER_SERVICE_ID ? 'Render Nuvem' : 'Máquina Local'}</strong>
         </div>
       </div>
 
-      <!-- Área dos Post-its -->
       <div class="grid-container">
         
         <div class="post-it">
-          <h3>💻 Sistema e Hardware</h3>
+          <h3>💻 Sistema e Kernel</h3>
+          <p><strong>Plataforma:</strong> ${os.platform()} <span class="code-inline">${os.arch()}</span></p>
+          <p><strong>Versão do Kernel:</strong> ${kernel}</p>
           <p><strong>Hostname:</strong> ${os.hostname()}</p>
-          <p><strong>Plataforma:</strong> ${os.platform()}</p>
-          <p><strong>Arquitetura:</strong> ${os.arch()}</p>
-          <p><strong>Usuário:</strong> ${usuarioInfo}</p>
+          <p><strong>Usuário Logado:</strong> ${os.userInfo().username}</p>
+        </div>
+
+        <div class="post-it">
+          <h3>🚀 Desempenho (CPU)</h3>
+          <p><strong>Carga (1m, 5m, 15m):</strong><br> ${loadAvg[0].toFixed(2)} | ${loadAvg[1].toFixed(2)} | ${loadAvg[2].toFixed(2)}</p>
+          <p><strong>Total de Núcleos:</strong> ${cpus.length}</p>
+          <p><strong>Modelo:</strong> ${modeloCPU}</p>
         </div>
 
         <div class="post-it">
           <h3>🧠 Memória RAM</h3>
           <p><strong>Total:</strong> ${memTotal} MB</p>
           <p><strong>Livre:</strong> ${memLivre} MB</p>
-          <p><strong>Em Uso:</strong> ${memEmUso} MB</p>
+          <p><strong>App Node Atual:</strong> Consumindo ~${nodeRAM} MB</p>
         </div>
 
         <div class="post-it">
-          <h3>⚙️ Processamento</h3>
-          <p><strong>Total de CPUs:</strong> ${cpus.length}</p>
-          <p><strong>Modelo:</strong> ${modeloCPU}</p>
+          <h3>⏱️ Uptime do Servidor</h3>
+          <p><strong>Máquina Virtual:</strong><br> ${tempoSO}</p>
+          <p><strong>Aplicação Node.js:</strong><br> ${tempoNode}</p>
         </div>
 
         <div class="post-it">
-          <h3>⏱️ Tempo Ativo</h3>
-          <p><strong>Servidor (SO):</strong><br> ${tempoSO}</p>
-          <p><strong>Aplicação (Node):</strong><br> ${tempoNode}</p>
+          <h3>🌍 Rede</h3>
+          <p><strong>IP Principal:</strong> ${ipPrincipal}</p>
+          <p><strong>Todas Interfaces:</strong><br> ${ips.length > 0 ? ips.join('<br>') : 'Nenhuma'}</p>
         </div>
 
         <div class="post-it">
-          <h3>🌍 Rede e Ambiente</h3>
-          <p><strong>Versão Node:</strong> ${process.version}</p>
-          <p><strong>Node Env:</strong> ${process.env.NODE_ENV || 'Não definido'}</p>
-          <p><strong>IP Ativo:</strong> ${ips.length > 0 ? ips.join(' | ') : 'Nenhum'}</p>
-        </div>
-
-        <div class="post-it">
-          <h3>📂 Arquivos (Raiz)</h3>
-          <p><strong>Caminho:</strong> ${__dirname}</p>
-          <p><strong>Arquivos:</strong> ${arquivos}</p>
+          <h3>📂 Ambiente e Arquivos</h3>
+          <p><strong>Node Version:</strong> ${process.version}</p>
+          <p><strong>Diretório:</strong> <span class="code-inline">${__dirname}</span></p>
+          <p><strong>Arquivos Raiz:</strong><br> ${arquivos}</p>
         </div>
 
       </div>
