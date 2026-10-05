@@ -47,6 +47,9 @@ const toMB = (v) => (v / 1024 / 1024).toFixed(0);
 const calcPercent = (p, t) => (t ? ((p / t) * 100).toFixed(0) : "0");
 const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 
+const kv = (rows) =>
+  '<ul class="kv">' + rows.map(([k, v]) => '<li><span>' + esc(k) + '</span><b>' + esc(v) + '</b></li>').join("") + "</ul>";
+
 function formatUptime(seconds) {
   const d = Math.floor(seconds / 86400), h = Math.floor((seconds % 86400) / 3600);
   const m = Math.floor((seconds % 3600) / 60), s = Math.floor(seconds % 60);
@@ -115,7 +118,6 @@ app.get("/", (req, res) => {
 <html lang="pt-PT">
 <head>
 <meta charset="UTF-8">
-<meta http-equiv="refresh" content="10">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>${esc(os.hostname())} · painel</title>
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
@@ -171,8 +173,11 @@ app.get("/", (req, res) => {
 
   /* navegação */
   nav { grid-column: 2 / 3; grid-row: 1; display: flex; gap: 22px; align-items: flex-start; padding-top: 42px; font-size: 15px; }
-  nav span.on { color: var(--text-strong); position: relative; }
-  nav span.on::after { content: ""; position: absolute; left: 50%; bottom: -14px; width: 8px; height: 8px; margin-left: -4px; border-radius: 50%; background: var(--blue); }
+  nav a { color: inherit; text-decoration: none; position: relative; cursor: pointer; transition: color .15s; border-radius: 6px; }
+  nav a:hover { color: var(--blue-ink); }
+  nav a:focus-visible { outline: 2px solid var(--blue); outline-offset: 4px; }
+  nav a.on { color: var(--text-strong); }
+  nav a.on::after { content: ""; position: absolute; left: 50%; bottom: -14px; width: 8px; height: 8px; margin-left: -4px; border-radius: 50%; background: var(--blue); }
 
   .user { grid-column: 3 / 4; grid-row: 1; display: flex; justify-content: flex-end; align-items: center; gap: 14px; padding-top: 28px; text-align: right; font-size: 13px; color: var(--blue); }
   .user b { display: block; color: var(--text); font-weight: 600; font-size: 14px; }
@@ -228,7 +233,7 @@ app.get("/", (req, res) => {
   .center > *:not(.blob) { position: relative; z-index: 1; }
 
   h1, h2 { font-family: 'Lexend', sans-serif; margin: 0; letter-spacing: 0; }
-  .big { font-size: 64px; font-weight: 800; line-height: 1; color: var(--blue-soft); margin-top: 40px; }
+  .big { font-size: 52px; overflow-wrap: anywhere; font-weight: 800; line-height: 1; color: var(--blue-soft); margin-top: 40px; }
   .sub { font-style: italic; font-size: 17px; margin: 14px 0 28px; color: var(--text); }
   .desc { max-width: 330px; font-size: 16px; line-height: 1.25; margin: 0 0 18px; }
   .more { font-style: italic; color: var(--blue-soft); font-size: 16px; }
@@ -239,6 +244,13 @@ app.get("/", (req, res) => {
   }
   .bubble::before { content: ""; position: absolute; left: 0; top: -10px; width: 22px; height: 22px; background: #fff; border-radius: 0 100% 0 100%; transform: rotate(-90deg); }
 
+  .pane { display: none; }
+  .pane.on { display: block; }
+  .kv { list-style: none; margin: 0 0 18px; padding: 0; max-width: 330px; }
+  .kv li { display: flex; justify-content: space-between; gap: 12px; font-size: 14px; padding: 7px 0; border-bottom: 1px dashed var(--gray-line); }
+  .kv li b { color: var(--text-strong); font-weight: 700; text-align: right; overflow-wrap: anywhere; }
+  .pills { display: flex; flex-wrap: wrap; gap: 8px; max-width: 330px; margin-bottom: 18px; }
+  .pills span { background: var(--gray); border-radius: 14px; padding: 8px 14px; font-size: 13px; color: var(--text-strong); }
   .chart-box { margin-top: 22px; height: 130px; max-width: 420px; }
 
   /* lista (direita) */
@@ -290,7 +302,7 @@ app.get("/", (req, res) => {
     .stage { height: 300px; margin: 10px -22px 0; overflow: hidden; }
     .arc, .vinyl, .vinyl-label { left: -300px; top: -60px; }
     .ctrl { display: none; }
-    .big { margin-top: 20px; font-size: 48px; }
+    .big { margin-top: 20px; font-size: 44px; }
     .side { padding-top: 10px; }
     .item.active { margin: 14px 0; }
     .logs { grid-column: 1; grid-row: auto; margin: 24px 0 0; width: 100%; justify-self: stretch; }
@@ -305,7 +317,7 @@ app.get("/", (req, res) => {
 
   <main class="player">
     <nav>
-      <span>home</span><span>hardware</span><span>rede</span><span>ficheiros</span><span class="on">painel</span>
+      <a href="#home" data-tab="home">home</a><a href="#hardware" data-tab="hardware">hardware</a><a href="#rede" data-tab="rede">rede</a><a href="#ficheiros" data-tab="ficheiros">ficheiros</a><a href="#painel" data-tab="painel" class="on">painel</a>
     </nav>
 
     <div class="user">
@@ -330,12 +342,63 @@ app.get("/", (req, res) => {
 
     <section class="center">
       <i class="blob a"></i><i class="blob b"></i><i class="blob c"></i>
-      <h1 class="big">Memória</h1>
-      <div class="sub">uso de ram · ${toGB(os.totalmem())} gb no total</div>
-      <p class="desc">${esc(data.git.msg.split("\n")[0])}. Último commit na branch ${esc(data.git.branch)}, ficheiros na raiz: ${data.files.map(esc).join(", ") || "nenhum"}.</p>
-      <span class="more">ver mais..</span>
-      <div class="bubble">${esc(data.status.msg)}</div>
-      <div class="chart-box"><canvas id="ramChart"></canvas></div>
+      <div class="pane" id="pane-home">
+        <h1 class="big">Home</h1>
+        <div class="sub">${esc(os.hostname())} · online há ${formatUptime(process.uptime())}</div>
+        ${kv([
+          ["memória ram", data.ramUsage + "%"],
+          ["processador", data.avgCpu + "%"],
+          ["disco", data.disk.percent],
+          ["visitas ao site", String(totalRequests)],
+          ["estado", data.status.text],
+        ])}
+        <div class="bubble">${esc(data.status.msg)}</div>
+      </div>
+
+      <div class="pane" id="pane-hardware">
+        <h1 class="big">Hardware</h1>
+        <div class="sub">${esc(data.cpus[0].model.trim())}</div>
+        ${kv([
+          ["vcpus", String(data.cpus.length)],
+          ["arquitetura", os.arch()],
+          ["ram total", toGB(os.totalmem()) + " GB"],
+          ["ram livre", toGB(os.freemem()) + " GB"],
+          ["node (rss)", toMB(process.memoryUsage().rss) + " MB"],
+          ["disco total", data.disk.size],
+          ["disco usado", data.disk.used + " (" + data.disk.percent + ")"],
+          ["disco livre", data.disk.avail],
+        ])}
+      </div>
+
+      <div class="pane" id="pane-rede">
+        <h1 class="big">Rede</h1>
+        <div class="sub">ambiente e ligação</div>
+        ${kv([
+          ["hostname", os.hostname()],
+          ["ip", data.mainIP],
+          ["sistema", os.type() + " " + os.release()],
+          ["node", process.version],
+          ["porta", String(PORT)],
+          ["branch", data.git.branch],
+          ["commit", data.git.hash],
+        ])}
+        <p class="desc">${esc(data.git.msg.split("\n")[0])}</p>
+      </div>
+
+      <div class="pane" id="pane-ficheiros">
+        <h1 class="big">Ficheiros</h1>
+        <div class="sub">pasta raiz do projeto</div>
+        <div class="pills">${data.files.map((f) => "<span>" + esc(f) + "</span>").join("") || "<span>vazio</span>"}</div>
+        <p class="desc">a mostrar os primeiros ${data.files.length} itens da pasta onde o servidor está a correr.</p>
+      </div>
+
+      <div class="pane on" id="pane-painel">
+        <h1 class="big">Memória</h1>
+        <div class="sub">uso de ram · ${toGB(os.totalmem())} gb no total</div>
+        <p class="desc">Último commit na branch ${esc(data.git.branch)}: ${esc(data.git.msg.split("\n")[0])}.</p>
+        <div class="bubble">${esc(data.status.msg)}</div>
+        <div class="chart-box"><canvas id="ramChart"></canvas></div>
+      </div>
     </section>
 
     <aside class="side">
@@ -361,7 +424,7 @@ app.get("/", (req, res) => {
     Chart.defaults.color = '#8a8a8e';
     Chart.defaults.font.family = "'Quicksand', sans-serif";
     const history = ${JSON.stringify(ramHistory)};
-    new Chart(document.getElementById('ramChart').getContext('2d'), {
+    const ramChart = new Chart(document.getElementById('ramChart').getContext('2d'), {
       type: 'line',
       data: {
         labels: history.map(h => h.time),
@@ -381,6 +444,25 @@ app.get("/", (req, res) => {
         plugins: { legend: { display: false } }
       }
     });
+
+    // abas: o hash do URL guarda a aba ativa (sobrevive ao recarregamento)
+    const tabs = [...document.querySelectorAll('nav a')];
+    function showTab(name) {
+      if (!document.getElementById('pane-' + name)) name = 'painel';
+      tabs.forEach(a => a.classList.toggle('on', a.dataset.tab === name));
+      document.querySelectorAll('.pane').forEach(p => p.classList.toggle('on', p.id === 'pane-' + name));
+      ramChart.resize();
+    }
+    tabs.forEach(a => a.addEventListener('click', e => {
+      e.preventDefault();
+      history_replace(a.dataset.tab);
+      showTab(a.dataset.tab);
+    }));
+    function history_replace(name) { window.history.replaceState(null, '', '#' + name); }
+    showTab(location.hash.slice(1) || 'painel');
+
+    // atualização automática a cada 10s, mantendo a aba
+    setTimeout(() => location.reload(), 10000);
   </script>
 </body>
 </html>`);
