@@ -1,264 +1,338 @@
-const express = require('express');
-const os = require('os');
-const fs = require('fs');
+const express = require("express");
+const os = require("os");
+const fs = require("fs");
+const path = require("path");
 
 const app = express();
+const PORT = process.env.PORT || 3000;
 
-function formatarTempo(segundosIniciais) {
-  const d = Math.floor(segundosIniciais / (3600 * 24));
-  const h = Math.floor((segundosIniciais % (3600 * 24)) / 3600);
-  const m = Math.floor((segundosIniciais % 3600) / 60);
-  
-  let resultado = '';
-  if (d > 0) resultado += `${d} dias, `;
-  if (h > 0 || d > 0) resultado += `${h} horas e `;
-  resultado += `${m} minutos`;
-  
-  return resultado;
+/* =========================
+   Funções auxiliares
+========================= */
+function gb(v) {
+  return (v / 1024 / 1024 / 1024).toFixed(2);
 }
 
-app.get('/', (req, res) => {
-  const cpus = os.cpus();
-  const modeloCPU = cpus.length > 0 ? cpus[0].model : 'Desconhecido';
-  const loadAvg = os.loadavg(); 
+function mb(v) {
+  return (v / 1024 / 1024).toFixed(2);
+}
 
-  const memTotal = Math.round(os.totalmem() / 1024 / 1024);
-  const memLivre = Math.round(os.freemem() / 1024 / 1024);
-  const memEmUso = memTotal - memLivre;
-  const porcentagemUso = Math.round((memEmUso / memTotal) * 100);
-  
-  const memNodeRSS = Math.round(process.memoryUsage().rss / 1024 / 1024);
-  const memNodeHeap = Math.round(process.memoryUsage().heapUsed / 1024 / 1024);
+function percent(part, total) {
+  if (!total) return "0";
+  return ((part / total) * 100).toFixed(0);
+}
 
-  let statusGeral = "🟢 Saudável";
-  let corStatus = "#10b981"; 
-  if (porcentagemUso > 90) {
-    statusGeral = "🔴 Crítico";
-    corStatus = "#ef4444"; 
-  } else if (porcentagemUso > 75) {
-    statusGeral = "🟡 Atenção";
-    corStatus = "#f59e0b"; 
+function formatUptime(seconds) {
+  const days = Math.floor(seconds / 86400);
+  const hours = Math.floor((seconds % 86400) / 3600);
+  const minutes = Math.floor((seconds % 3600) / 60);
+  return `${days}d ${hours}h ${minutes}m`;
+}
+
+function getIPs() {
+  const nets = os.networkInterfaces();
+  const list = [];
+  for (const name in nets) {
+    for (const net of nets[name]) {
+      list.push({
+        interface: name,
+        address: net.address,
+        family: net.family,
+        mac: net.mac,
+        internal: net.internal
+      });
+    }
   }
+  return list;
+}
 
-  const redes = os.networkInterfaces();
-  let ips = [];
-  let ipPrincipal = "Desconhecido";
-  for (const interfaceNome in redes) {
-    redes[interfaceNome].forEach(rede => {
-      if (!rede.internal && rede.family === 'IPv4') {
-        ips.push(`${interfaceNome}: ${rede.address}`);
-        if (ipPrincipal === "Desconhecido") ipPrincipal = rede.address;
-      }
-    });
-  }
+function getMainIP(ips) {
+  const ip = ips.find(i => !i.internal && i.family === "IPv4");
+  return ip ? ip.address : "N/A";
+}
 
-  const kernel = os.release();
-  let arquivos = [];
+function getFilesDetailed() {
   try {
-      arquivos = fs.readdirSync(__dirname).join(', ');
-  } catch (err) {
-      arquivos = "Erro ao ler arquivos";
+    return fs.readdirSync(".").slice(0, 20).map(file => {
+      const stat = fs.statSync(path.join(".", file));
+      return {
+        name: file,
+        type: stat.isDirectory() ? "Dir" : "Arquivo",
+        size: stat.isDirectory() ? "-" : `${(stat.size / 1024).toFixed(2)} KB`,
+        modified: stat.mtime.toLocaleString()
+      };
+    });
+  } catch {
+    return [];
   }
+}
 
-  const tempoSO = formatarTempo(os.uptime());
-  const tempoNode = formatarTempo(process.uptime());
+function cpuStats() {
+  return os.cpus().map((cpu, index) => {
+    const t = cpu.times;
+    const total = t.user + t.nice + t.sys + t.idle + t.irq;
+    const used = total - t.idle;
+    return {
+      core: index,
+      model: cpu.model,
+      speed: cpu.speed,
+      usage: percent(used, total),
+      idle: t.idle
+    };
+  });
+}
+
+function healthStatus(ramUsage, loadAvg, cores) {
+  if (ramUsage > 85 || loadAvg > cores) {
+    return { label: "CRÍTICO", color: "#ef4444" };
+  }
+  if (ramUsage > 65 || loadAvg > cores * 0.7) {
+    return { label: "ATENÇÃO", color: "#f59e0b" };
+  }
+  return { label: "SAUDÁVEL", color: "#10b981" };
+}
+
+/* =========================
+   Rota principal
+========================= */
+app.get("/", (req, res) => {
+  const total = os.totalmem();
+  const free = os.freemem();
+  const used = total - free;
+  const ramPercent = Number(percent(used, total));
+
+  const cpus = cpuStats();
+  const cpuCount = cpus.length;
+  const avgCpu = (
+    cpus.reduce((sum, c) => sum + Number(c.usage), 0) / cpuCount
+  ).toFixed(0);
+
+  const load = os.loadavg();
+  const ips = getIPs();
+  const mainIP = getMainIP(ips);
+  const files = getFilesDetailed();
+
+  const user = os.userInfo();
+  const uptime = os.uptime();
+  const health = healthStatus(ramPercent, load[0], cpuCount);
 
   res.send(`
-    <html>
-    <head>
-      <meta charset="utf-8">
-      <title>Dashboard do Servidor</title>
-      <meta name="viewport" content="width=device-width, initial-scale=1.0">
-      <style>
-        @import url('https://fonts.googleapis.com/css2?family=Kalam:wght@400;700&family=Nunito:wght@400;600;700&display=swap');
-        
-        body { 
-          font-family: 'Nunito', sans-serif; 
-          background-color: #faf5ff; 
-          margin: 0; 
-          padding: 30px; 
-          color: #3b2163; 
-        }
-        
-        /* BARRA SUPERIOR */
-        .summary-bar {
-          background: linear-gradient(135deg, #8b5cf6, #6d28d9);
-          color: white;
-          display: flex;
-          justify-content: space-around;
-          align-items: center;
-          padding: 20px;
-          border-radius: 12px;
-          margin-bottom: 40px;
-          box-shadow: 0 4px 15px rgba(109, 40, 217, 0.2);
-          flex-wrap: wrap;
-          gap: 15px;
-        }
-        .summary-item { text-align: center; }
-        .summary-item span {
-          display: block;
-          font-size: 0.85em;
-          opacity: 0.9;
-          text-transform: uppercase;
-          letter-spacing: 1px;
-          margin-bottom: 5px;
-        }
-        .summary-item strong { font-size: 1.5em; }
-        .status-badge { color: ${corStatus}; font-weight: bold; text-shadow: 1px 1px 2px rgba(0,0,0,0.5); }
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<meta http-equiv="refresh" content="10">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Dashboard Mesclado</title>
 
-        /* GRID DE BLOCOS - Ajustado para caber mais blocos lado a lado */
-        .grid-container {
-          display: grid;
-          grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
-          gap: 20px;
-          padding: 10px 0;
-        }
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Kalam:wght@400;700&family=Nunito:wght@400;600;700&display=swap');
 
-        /* ESTILO DOS BLOCOS (CARDS) */
-        .bloco {
-          background-color: #ffffff; 
-          padding: 20px;
-          border-radius: 12px;
-          border: 1px solid #e9d5ff;
-          box-shadow: 0 4px 6px rgba(109, 40, 217, 0.05);
-          transition: transform 0.2s ease, box-shadow 0.2s ease;
-          font-family: 'Kalam', cursive; 
-        }
-        
-        .bloco:hover { 
-          transform: translateY(-5px); 
-          box-shadow: 0 8px 20px rgba(109, 40, 217, 0.15); 
-        }
+body {
+  font-family: 'Nunito', sans-serif;
+  background: #faf5ff;
+  margin: 0;
+  padding: 20px;
+  color: #3b2163;
+}
 
-        .bloco h3 { 
-          color: #5b21b6; 
-          border-bottom: 2px solid #f3e8ff; 
-          padding-bottom: 8px; 
-          margin-top: 0; 
-          font-family: 'Nunito', sans-serif; 
-          font-weight: 700;
-          font-size: 1.1em;
-        }
-        .bloco p { margin: 8px 0; font-size: 1.05em; color: #4c1d95; }
-        .code-inline { background: #f3e8ff; padding: 2px 6px; border-radius: 4px; font-family: 'Nunito', monospace; font-size: 0.85em; color: #6d28d9; }
-      </style>
-    </head>
-    <body>
-      
-      <div class="summary-bar">
-        <div class="summary-item">
-          <span>Status Geral</span>
-          <strong class="status-badge">${statusGeral}</strong>
-        </div>
-        <div class="summary-item">
-          <span>IP Principal</span>
-          <strong>${ipPrincipal}</strong>
-        </div>
-        <div class="summary-item">
-          <span>Uso de RAM</span>
-          <strong>${porcentagemUso}%</strong>
-        </div>
-        <div class="summary-item">
-          <span>Ambiente</span>
-          <strong>${process.env.RENDER_SERVICE_ID ? 'Render Nuvem' : 'Local'}</strong>
-        </div>
-      </div>
+h1 { text-align: center; margin-bottom: 5px; color: #5b21b6; }
+h2 { color: #5b21b6; border-bottom: 2px solid #f3e8ff; padding-bottom: 8px; margin-top: 0; font-size: 1.2em; font-family: 'Nunito', sans-serif; }
 
-      <div class="grid-container">
-        
-        <!-- Bloco 1 -->
-        <div class="bloco">
-          <h3>💻 Sistema Operacional</h3>
-          <p><strong>Tipo:</strong> ${os.type()}</p>
-          <p><strong>Plataforma:</strong> ${os.platform()}</p>
-          <p><strong>Kernel:</strong> ${kernel}</p>
-        </div>
+.subtitle { text-align: center; color: #7c3aed; margin-bottom: 25px; font-weight: bold; }
 
-        <!-- Bloco 2 -->
-        <div class="bloco">
-          <h3>👤 Identificação</h3>
-          <p><strong>Hostname:</strong> ${os.hostname()}</p>
-          <p><strong>Usuário Logado:</strong> ${os.userInfo().username}</p>
-        </div>
+.grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 20px; }
+.top-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 15px; margin-bottom: 25px; }
 
-        <!-- Bloco 3 -->
-        <div class="bloco">
-          <h3>⚙️ Processador (CPU)</h3>
-          <p><strong>Arquitetura:</strong> <span class="code-inline">${os.arch()}</span></p>
-          <p><strong>Núcleos:</strong> ${cpus.length}</p>
-          <p><strong>Modelo:</strong> ${modeloCPU}</p>
-        </div>
+.card {
+  background: #fff;
+  border-radius: 12px;
+  padding: 20px;
+  border: 1px solid #e9d5ff;
+  box-shadow: 0 4px 6px rgba(109, 40, 217, 0.05);
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+  font-family: 'Kalam', cursive;
+  font-size: 1.1em;
+}
 
-        <!-- Bloco 4 -->
-        <div class="bloco">
-          <h3>📈 Carga do Sistema</h3>
-          <p><strong>Último 1 min:</strong> ${loadAvg[0].toFixed(2)}</p>
-          <p><strong>Últimos 5 min:</strong> ${loadAvg[1].toFixed(2)}</p>
-          <p><strong>Últimos 15 min:</strong> ${loadAvg[2].toFixed(2)}</p>
-        </div>
+.card:hover { transform: translateY(-5px); box-shadow: 0 8px 20px rgba(109, 40, 217, 0.15); }
 
-        <!-- Bloco 5 -->
-        <div class="bloco">
-          <h3>🧠 Memória do Servidor</h3>
-          <p><strong>Total:</strong> ${memTotal} MB</p>
-          <p><strong>Livre:</strong> ${memLivre} MB</p>
-          <p><strong>Em Uso:</strong> ${memEmUso} MB</p>
-        </div>
+.kpi {
+  text-align: center;
+  font-family: 'Nunito', sans-serif;
+  background: linear-gradient(135deg, #8b5cf6, #6d28d9);
+  color: white;
+  border: none;
+}
 
-        <!-- Bloco 6 -->
-        <div class="bloco">
-          <h3>📦 Memória do Node.js</h3>
-          <p><strong>Espaço Total (RSS):</strong> ${memNodeRSS} MB</p>
-          <p><strong>Processos (Heap):</strong> ${memNodeHeap} MB</p>
-        </div>
+.kpi h3 { color: #ddd6fe; font-size: 13px; text-transform: uppercase; letter-spacing: 1px; border: none; }
+.kpi .value { font-size: 26px; font-weight: bold; margin-top: 8px; color: white; }
 
-        <!-- Bloco 7 -->
-        <div class="bloco">
-          <h3>⏱️ Tempo do Servidor</h3>
-          <p><strong>Ligado há:</strong></p>
-          <p>${tempoSO}</p>
-        </div>
+.bar { background: #f3e8ff; height: 22px; border-radius: 10px; overflow: hidden; margin-top: 8px; box-shadow: inset 0 1px 3px rgba(0,0,0,0.1); }
+.fill { background: linear-gradient(90deg, #8b5cf6, #6d28d9); height: 100%; color: #fff; text-align: center; line-height: 22px; font-size: 12px; font-family: 'Nunito', sans-serif; font-weight: bold; }
 
-        <!-- Bloco 8 -->
-        <div class="bloco">
-          <h3>⏱️ Tempo da Aplicação</h3>
-          <p><strong>Rodando há:</strong></p>
-          <p>${tempoNode}</p>
-        </div>
+.small { color: #8b5cf6; font-size: 14px; margin-top: 10px; display: block; font-family: 'Nunito', sans-serif; }
 
-        <!-- Bloco 9 -->
-        <div class="bloco">
-          <h3>🌍 Conectividade</h3>
-          <p><strong>IP Ativo:</strong> ${ipPrincipal}</p>
-          <p><strong>Interfaces:</strong> ${ips.length}</p>
-        </div>
+table { width: 100%; border-collapse: collapse; font-size: 15px; margin-top: 10px; }
+th, td { padding: 8px; border-bottom: 1px dashed #d8b4fe; text-align: left; }
+th { font-family: 'Nunito', sans-serif; color: #5b21b6; }
 
-        <!-- Bloco 10 -->
-        <div class="bloco">
-          <h3>🟩 Plataforma Node</h3>
-          <p><strong>Versão:</strong> ${process.version}</p>
-          <p><strong>Variável ENV:</strong> <span class="code-inline">${process.env.NODE_ENV || 'Padrão'}</span></p>
-        </div>
+.badge { display: inline-block; padding: 6px 12px; border-radius: 999px; color: #fff; font-weight: bold; font-size: 14px; font-family: 'Nunito', sans-serif; box-shadow: 0 2px 4px rgba(0,0,0,0.2); }
+.core { margin-bottom: 12px; }
+.footer { text-align: center; color: #8b5cf6; margin-top: 30px; font-size: 14px; font-family: 'Nunito', sans-serif; font-weight: bold; }
+p { margin: 6px 0; }
+</style>
+</head>
 
-        <!-- Bloco 11 -->
-        <div class="bloco">
-          <h3>📂 Diretório Atual</h3>
-          <p><strong>Caminho:</strong></p>
-          <p><span class="code-inline">${__dirname}</span></p>
-        </div>
+<body>
 
-        <!-- Bloco 12 -->
-        <div class="bloco">
-          <h3>📄 Arquivos Locais</h3>
-          <p><strong>Itens na Raiz:</strong></p>
-          <p>${arquivos}</p>
-        </div>
+<h1>🖥️ Dashboard do Servidor</h1>
+<div class="subtitle">
+Atualizado automaticamente em: ${new Date().toLocaleTimeString('pt-BR')}
+</div>
 
-      </div>
-    </body>
-    </html>
+<!-- KPIs (Agora com estilo da barra roxa) -->
+<div class="top-grid">
+  <div class="card kpi">
+    <h3>Uso de RAM</h3>
+    <div class="value">${ramPercent}%</div>
+  </div>
+  <div class="card kpi">
+    <h3>CPU Média</h3>
+    <div class="value">${avgCpu}%</div>
+  </div>
+  <div class="card kpi">
+    <h3>Uptime</h3>
+    <div class="value" style="font-size: 20px;">${formatUptime(uptime)}</div>
+  </div>
+  <div class="card kpi">
+    <h3>IP Principal</h3>
+    <div class="value" style="font-size: 20px;">${mainIP}</div>
+  </div>
+  <div class="card kpi" style="background: #fff; border: 2px solid ${health.color};">
+    <h3 style="color: #666;">Status Geral</h3>
+    <div class="value">
+      <span class="badge" style="background:${health.color}">
+        ${health.label}
+      </span>
+    </div>
+  </div>
+</div>
+
+<div class="grid">
+
+<!-- Sistema -->
+<div class="card">
+  <h2>📌 Sistema</h2>
+  <p><b>Host:</b> ${os.hostname()}</p>
+  <p><b>SO:</b> ${os.type()}</p>
+  <p><b>Release:</b> ${os.release()}</p>
+  <p><b>Plataforma:</b> ${os.platform()}</p>
+  <p><b>Arquitetura:</b> ${os.arch()}</p>
+  <span class="small">Hostname = Nome interno da máquina</span>
+</div>
+
+<!-- Usuário -->
+<div class="card">
+  <h2>👤 Identificação</h2>
+  <p><b>Usuário:</b> ${user.username}</p>
+  <p><b>Diretório Home:</b> ${os.homedir()}</p>
+  <p><b>Node Version:</b> ${process.version}</p>
+</div>
+
+<!-- Memória -->
+<div class="card">
+  <h2>🧠 Memória RAM</h2>
+  <p><b>Total:</b> ${gb(total)} GB</p>
+  <p><b>Usada:</b> ${gb(used)} GB</p>
+  <p><b>Livre:</b> ${gb(free)} GB</p>
+
+  <div class="bar">
+    <div class="fill" style="width:${ramPercent}%">
+      ${ramPercent}% Em Uso
+    </div>
+  </div>
+  <span class="small">Total de RAM da máquina virtual</span>
+</div>
+
+<!-- CPU -->
+<div class="card">
+  <h2>⚙️ Desempenho (CPU)</h2>
+  <p><b>Modelo:</b> ${cpus[0].model}</p>
+  <p><b>Load Avg:</b> ${load.map(v => v.toFixed(2)).join(" | ")}</p>
+  <br>
+  ${cpus.map(c => `
+  <div class="core">
+    <div style="font-family: 'Nunito', sans-serif; font-size: 14px; font-weight: bold; color: #5b21b6;">Núcleo ${c.core + 1} -${c.usage}%</div>
+    <div class="bar" style="height: 14px;">
+      <div class="fill" style="width:${c.usage}%; line-height: 14px; font-size: 10px;"></div>
+    </div>
+  </div>
+  `).join("")}
+</div>
+
+<!-- Rede -->
+<div class="card">
+  <h2>🌐 Conectividade</h2>
+  <table>
+    <tr>
+      <th>Interface</th>
+      <th>IP</th>
+      <th>Família</th>
+    </tr>
+    ${ips.map(ip => `
+    <tr>
+      <td>${ip.interface}</td>
+      <td>${ip.address}</td>
+      <td>${ip.family}</td>
+    </tr>
+    `).join("")}
+  </table>
+</div>
+
+<!-- Arquivos -->
+<div class="card">
+  <h2>📂 Arquivos da Raiz</h2>
+  <table>
+    <tr>
+      <th>Nome</th>
+      <th>Tipo</th>
+      <th>Tamanho</th>
+    </tr>
+    ${files.map(f => `
+    <tr>
+      <td>${f.name}</td>
+      <td>${f.type}</td>
+      <td>${f.size}</td>
+    </tr>
+    `).join("")}
+  </table>
+</div>
+
+<!-- Aplicação e Ambiente -->
+<div class="card">
+  <h2>☁️ Ambiente e Processo</h2>
+  <p><b>Status:</b> ${process.env.RENDER || process.env.RENDER_SERVICE_ID ? "Nuvem (Render)" : "Local"}</p>
+  <p><b>Porta:</b> ${PORT}</p>
+  <p><b>PID Processo:</b> ${process.pid}</p>
+  <p><b>Caminho:</b> ${process.cwd()}</p>
+  <p><b>Memória do Node:</b> ${mb(process.memoryUsage().rss)} MB</p>
+</div>
+
+</div>
+
+<div class="footer">
+  Dashboard Mesclado • Atualizando a cada 10s
+</div>
+
+</body>
+</html>
   `);
 });
 
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log(`Servidor rodando na porta ${PORT}`));
+/* =========================
+   Inicialização
+========================= */
+app.listen(PORT, () => {
+  console.log("Servidor rodando na porta " + PORT);
+});
