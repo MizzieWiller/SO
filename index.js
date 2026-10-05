@@ -1,6 +1,7 @@
 const express = require("express");
 const os = require("os");
 const fs = require("fs");
+const path = require("path");
 const { execSync } = require("child_process");
 
 const app = express();
@@ -32,6 +33,22 @@ console.log = function (...args) {
 };
 
 app.use((req, res, next) => { totalRequests++; next(); });
+
+/* =========================
+   Músicas (coloca ficheiros mp3/ogg/wav/m4a na pasta "musicas")
+========================= */
+const MUSIC_DIR = path.join(__dirname, "musicas");
+try { fs.mkdirSync(MUSIC_DIR, { recursive: true }); } catch (e) {}
+app.use("/musicas", express.static(MUSIC_DIR));
+
+function listTracks() {
+  try {
+    return fs.readdirSync(MUSIC_DIR)
+      .filter((f) => /\.(mp3|ogg|wav|m4a|webm)$/i.test(f))
+      .sort()
+      .map((f) => ({ name: f.replace(/\.[^.]+$/, ""), url: "/musicas/" + encodeURIComponent(f) }));
+  } catch (e) { return []; }
+}
 
 setInterval(() => {
   const percent = (((os.totalmem() - os.freemem()) / os.totalmem()) * 100).toFixed(0);
@@ -98,6 +115,7 @@ function getSystemData() {
 ========================= */
 app.get("/", (req, res) => {
   const data = getSystemData();
+  const tracks = listTracks();
   if (ramHistory.length === 0) ramHistory.push({ time: new Date().toLocaleTimeString("pt-PT"), value: data.ramUsage });
 
   // arco de progresso à volta do vinil
@@ -200,6 +218,7 @@ app.get("/", (req, res) => {
     background-blend-mode: normal;
     box-shadow: 0 10px 30px rgba(0,0,0,.25);
     animation: spin 14s linear infinite;
+    animation-play-state: paused; /* só gira enquanto a música toca */
   }
   .vinyl::before { /* brilho */
     content: ""; position: absolute; inset: 0; border-radius: 50%;
@@ -222,6 +241,9 @@ app.get("/", (req, res) => {
     position: absolute; width: 56px; height: 56px; border-radius: 18px; background: var(--blue-soft);
     display: grid; place-items: center; color: #fff; font-size: 18px;
   }
+  .vinyl.playing { animation-play-state: running; }
+  .nowp { position: absolute; left: 92px; bottom: 305px; z-index: 3; max-width: 300px; color: #fff; font-size: 13px; font-style: italic; text-shadow: 0 1px 4px rgba(0,0,0,.6); }
+  .ctrl.next { left: 256px; bottom: 185px; }
   .ctrl:hover { background: var(--blue); }
   .ctrl:active { transform: scale(.92); }
   .ctrl.play { left: 170px; bottom: 215px; width: 72px; height: 72px; border-radius: 24px; }
@@ -318,7 +340,10 @@ app.get("/", (req, res) => {
     .stage { height: 300px; margin: 10px -22px 0; overflow: hidden; }
     .vinyl, .vinyl-label { left: -265px; top: -60px; }
     .arc { left: -290px; top: -85px; }
-    .ctrl { display: none; }
+    .ctrl.pause { left: 40px; bottom: 28px; }
+    .ctrl.play { left: 120px; bottom: 22px; }
+    .ctrl.next { left: 210px; bottom: 28px; }
+    .nowp { left: 24px; bottom: 110px; }
     .big { margin-top: 20px; font-size: 44px; }
     .side { padding-top: 10px; }
     .item.active { margin: 14px 0; }
@@ -330,6 +355,7 @@ app.get("/", (req, res) => {
 </style>
 </head>
 <body>
+  <audio id="bgm" preload="none"></audio>
   <button class="snd" id="snd" type="button" aria-pressed="true">som: ligado</button>
   <div class="tag">@${esc(os.hostname())}</div>
 
@@ -354,8 +380,10 @@ app.get("/", (req, res) => {
       </svg>
       <div class="vinyl"></div>
       <div class="vinyl-label"><span>${data.ramUsage}%</span></div>
-      <button class="ctrl pause" id="btnPause" aria-label="pausar vinil">❚❚</button>
-      <button class="ctrl play" id="btnPlay" aria-label="rodar vinil">▶</button>
+      <button class="ctrl pause" id="btnPause" aria-label="pausar música">❚❚</button>
+      <button class="ctrl play" id="btnPlay" aria-label="tocar música">▶</button>
+      ${tracks.length > 1 ? '<button class="ctrl next" id="btnNext" aria-label="próxima música">❭❭</button>' : ""}
+      <div class="nowp" id="nowp" aria-live="polite">música parada</div>
     </div>
 
     <section class="center">
@@ -510,7 +538,7 @@ app.get("/", (req, res) => {
       soundOn = !soundOn;
       try { localStorage.setItem('sound', soundOn ? 'on' : 'off'); } catch (e) {}
       paintSnd();
-      if (soundOn) sfx.on();
+      if (soundOn) sfx.on(); else pauseMusic();
     });
     paintSnd();
 
@@ -534,10 +562,122 @@ app.get("/", (req, res) => {
       a.addEventListener('mouseenter', () => sfx.hover());
     });
 
-    /* ---------- vinil: play / pause ---------- */
+    /* ---------- música ---------- */
+    const TRACKS = ${JSON.stringify(tracks).replace(/</g, "\\u003c")};
     const vinyl = document.querySelector('.vinyl');
-    document.getElementById('btnPlay').addEventListener('click', () => { vinyl.style.animationPlayState = 'running'; sfx.play(); });
-    document.getElementById('btnPause').addEventListener('click', () => { vinyl.style.animationPlayState = 'paused'; sfx.pause(); });
+    const bgm = document.getElementById('bgm');
+    const nowp = document.getElementById('nowp');
+    let playing = false, idx = 0;
+
+    function ac() {
+      audio = audio || new (window.AudioContext || window.webkitAudioContext)();
+      if (audio.state === 'suspended') audio.resume();
+      return audio;
+    }
+
+    // lo-fi original gerado no navegador (usado quando a pasta "musicas" está vazia)
+    const CHORDS = [
+      { bass: 110.00, pad: [220.00, 261.63, 329.63], arp: [261.63, 329.63, 392.00, 523.25] }, // Am7
+      { bass:  87.31, pad: [174.61, 261.63, 329.63], arp: [220.00, 261.63, 329.63, 440.00] }, // Fmaj7
+      { bass: 130.81, pad: [196.00, 246.94, 329.63], arp: [261.63, 329.63, 392.00, 493.88] }, // Cmaj7
+      { bass:  98.00, pad: [196.00, 246.94, 293.66], arp: [246.94, 293.66, 329.63, 392.00] }  // G6
+    ];
+    const ARP = [0, 1, 2, 3, 2, 1, 2, 1];
+    const STEP = 60 / 72 / 2; // colcheias a 72 bpm
+    const synth = { bus: null, noise: null, timer: null, next: 0, step: 0 };
+
+    function synthSetup(a) {
+      if (synth.bus) return;
+      const bus = a.createGain();
+      const lp = a.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 2400;
+      const delay = a.createDelay(); delay.delayTime.value = STEP * 3;
+      const fb = a.createGain(); fb.gain.value = 0.3;
+      const wet = a.createGain(); wet.gain.value = 0.35;
+      bus.connect(lp); lp.connect(a.destination);
+      lp.connect(delay); delay.connect(fb); fb.connect(delay); delay.connect(wet); wet.connect(a.destination);
+      const buf = a.createBuffer(1, a.sampleRate * 0.1, a.sampleRate);
+      const d = buf.getChannelData(0);
+      for (let k = 0; k < d.length; k++) d[k] = Math.random() * 2 - 1;
+      synth.bus = bus; synth.noise = buf;
+    }
+    function note(f, t, dur, type, vol, att = 0.01) {
+      const a = audio, o = a.createOscillator(), g = a.createGain();
+      o.type = type; o.frequency.value = f;
+      g.gain.setValueAtTime(0.0001, t);
+      g.gain.linearRampToValueAtTime(vol, t + att);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+      o.connect(g); g.connect(synth.bus);
+      o.start(t); o.stop(t + dur + 0.05);
+    }
+    function kick(t) {
+      const a = audio, o = a.createOscillator(), g = a.createGain();
+      o.frequency.setValueAtTime(120, t); o.frequency.exponentialRampToValueAtTime(45, t + 0.12);
+      g.gain.setValueAtTime(0.14, t); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.2);
+      o.connect(g); g.connect(synth.bus); o.start(t); o.stop(t + 0.22);
+    }
+    function hat(t, vol) {
+      const a = audio, src = a.createBufferSource(), f = a.createBiquadFilter(), g = a.createGain();
+      src.buffer = synth.noise; f.type = 'highpass'; f.frequency.value = 7000;
+      g.gain.setValueAtTime(vol, t); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.05);
+      src.connect(f); f.connect(g); g.connect(synth.bus); src.start(t); src.stop(t + 0.06);
+    }
+    function scheduleStep(i, t) {
+      const c = CHORDS[Math.floor(i / 8) % 4], st = i % 8;
+      if (st === 0) { c.pad.forEach(f => note(f, t, 3.3, 'sine', 0.022, 0.6)); note(c.bass, t, 1.6, 'sine', 0.09, 0.02); }
+      if (st === 4) note(c.bass, t, 1.2, 'sine', 0.07);
+      if (st === 0 || st === 5) kick(t);
+      hat(t, st % 2 ? 0.014 : 0.007);
+      note(c.arp[ARP[st]], t, 0.55, 'triangle', 0.035);
+    }
+    function startSynth() {
+      const a = ac(); synthSetup(a);
+      synth.bus.gain.cancelScheduledValues(a.currentTime);
+      synth.bus.gain.setTargetAtTime(1, a.currentTime, 0.05);
+      synth.next = a.currentTime + 0.1;
+      clearInterval(synth.timer);
+      synth.timer = setInterval(() => {
+        while (synth.next < a.currentTime + 0.3) {
+          scheduleStep(synth.step, synth.next + (synth.step % 2 ? 0.03 : 0));
+          synth.next += STEP; synth.step++;
+        }
+      }, 100);
+    }
+    function stopSynth() {
+      clearInterval(synth.timer);
+      if (audio && synth.bus) synth.bus.gain.setTargetAtTime(0, audio.currentTime, 0.12);
+    }
+
+    function trackName() { return TRACKS.length ? TRACKS[idx].name : 'lo-fi orbital · gerada no navegador'; }
+    function setNow() { nowp.textContent = playing ? '♪ ' + trackName() : 'música parada'; }
+    function loadTrack() { bgm.src = TRACKS[idx].url; bgm.play().catch(() => {}); }
+
+    function playMusic() {
+      unlocked = true;
+      if (!soundOn) { soundOn = true; try { localStorage.setItem('sound', 'on'); } catch (e) {} paintSnd(); }
+      playing = true;
+      vinyl.classList.add('playing');
+      if (TRACKS.length) { if (!bgm.src) loadTrack(); else bgm.play().catch(() => {}); }
+      else startSynth();
+      setNow();
+    }
+    function pauseMusic() {
+      playing = false;
+      vinyl.classList.remove('playing');
+      if (TRACKS.length) bgm.pause(); else stopSynth();
+      setNow();
+    }
+    function nextTrack() {
+      if (TRACKS.length < 2) return;
+      idx = (idx + 1) % TRACKS.length;
+      if (playing) loadTrack();
+      setNow();
+    }
+    bgm.addEventListener('ended', nextTrack);
+    document.getElementById('btnPlay').addEventListener('click', () => { playMusic(); });
+    document.getElementById('btnPause').addEventListener('click', () => { pauseMusic(); sfx.pause(); });
+    const btnNext = document.getElementById('btnNext');
+    if (btnNext) btnNext.addEventListener('click', () => { nextTrack(); sfx.tab(); });
+    setNow();
 
     // som suave ao passar o rato nos cartões da lista
     document.addEventListener('mouseover', e => {
