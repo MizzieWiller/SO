@@ -1,5 +1,7 @@
 # 🖥️ Dashboard de Sistemas Operacionais (SO)
 
+**📍 Acesso em Tempo Real:** [https://so-co8a.onrender.com/]
+
 Este repositório contém uma aplicação Node.js com Express concebida para monitorizar as métricas e o desempenho de servidores em tempo real. Desenvolvido como projeto prático para o curso de Análise e Desenvolvimento de Sistemas na Fatec Itapetininga, este sistema explora a interação direta entre a camada aplicacional e o hardware da máquina host.
 
 A interface web apresenta um painel de controlo dinâmico que atualiza automaticamente a cada 10 segundos, convertendo dados brutos do sistema operativo (como memória, carga de CPU e rede) em visualizações acessíveis, ideal para analisar e depurar ambientes de alojamento na nuvem como o Render.
@@ -14,4 +16,3 @@ A interface web apresenta um painel de controlo dinâmico que atualiza automatic
 *   **Integração Contínua (Git):** Lê os dados locais do repositório para exibir no ecrã a *branch*, o *hash* e a mensagem do último *commit* que está atualmente em produção.
 
 ---
-**📍 Acesso em Tempo Real:** [https://so-co8a.onrender.com/]
