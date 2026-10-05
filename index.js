@@ -218,9 +218,12 @@ app.get("/", (req, res) => {
   @keyframes spin { to { transform: rotate(360deg); } }
 
   .ctrl {
+    border: 0; cursor: pointer; font-family: inherit; transition: transform .12s, background .15s;
     position: absolute; width: 56px; height: 56px; border-radius: 18px; background: var(--blue-soft);
     display: grid; place-items: center; color: #fff; font-size: 18px;
   }
+  .ctrl:hover { background: var(--blue); }
+  .ctrl:active { transform: scale(.92); }
   .ctrl.play { left: 170px; bottom: 215px; width: 72px; height: 72px; border-radius: 24px; }
   .ctrl.pause { left: 92px; bottom: 185px; }
 
@@ -291,6 +294,19 @@ app.get("/", (req, res) => {
   ::-webkit-scrollbar { width: 5px; }
   ::-webkit-scrollbar-thumb { background: var(--blue-soft); border-radius: 4px; }
 
+  /* ecrãs largos: tudo um pouco maior */
+  @media (min-width: 1450px) { .player { zoom: 1.15; } }
+  @media (min-width: 1800px) { .player { zoom: 1.3; } }
+
+  /* botão de som */
+  .snd {
+    position: fixed; top: 14px; left: 24px; z-index: 20; border: 0; cursor: pointer; border-radius: 18px;
+    padding: 9px 16px; background: var(--blue-soft); color: #fff; font: 700 13px 'Quicksand', sans-serif; letter-spacing: .06em;
+  }
+  .snd:hover { background: var(--blue); }
+  .snd:focus-visible, .ctrl:focus-visible { outline: 3px solid var(--blue-ink); outline-offset: 3px; }
+  .snd.off { background: var(--gray-line); color: var(--text); }
+
   /* mobile / ecrãs pequenos */
   @media (max-width: 1000px) {
     body { padding: 12px; place-items: start center; }
@@ -313,6 +329,7 @@ app.get("/", (req, res) => {
 </style>
 </head>
 <body>
+  <button class="snd" id="snd" type="button" aria-pressed="true">som: ligado</button>
   <div class="tag">@${esc(os.hostname())}</div>
 
   <main class="player">
@@ -336,8 +353,8 @@ app.get("/", (req, res) => {
       </svg>
       <div class="vinyl"></div>
       <div class="vinyl-label"><span>${data.ramUsage}%</span></div>
-      <div class="ctrl pause">❚❚</div>
-      <div class="ctrl play">▶</div>
+      <button class="ctrl pause" id="btnPause" aria-label="pausar vinil">❚❚</button>
+      <button class="ctrl play" id="btnPlay" aria-label="rodar vinil">▶</button>
     </div>
 
     <section class="center">
@@ -423,46 +440,139 @@ app.get("/", (req, res) => {
   <script>
     Chart.defaults.color = '#8a8a8e';
     Chart.defaults.font.family = "'Quicksand', sans-serif";
-    const history = ${JSON.stringify(ramHistory)};
-    const ramChart = new Chart(document.getElementById('ramChart').getContext('2d'), {
-      type: 'line',
-      data: {
-        labels: history.map(h => h.time),
-        datasets: [{
-          data: history.map(h => h.value),
-          borderColor: '#8fb0c1',
-          backgroundColor: 'rgba(180, 205, 224, 0.35)',
-          borderWidth: 3, tension: 0.35, fill: true, pointRadius: 0
-        }]
-      },
-      options: {
-        responsive: true, maintainAspectRatio: false, animation: false,
-        scales: {
-          y: { beginAtZero: true, max: 100, grid: { color: 'rgba(0,0,0,0.05)' }, border: { display: false }, ticks: { stepSize: 50 } },
-          x: { grid: { display: false }, ticks: { display: false }, border: { display: false } }
+    /* ---------- gráfico ---------- */
+    let ramChart = null;
+    function buildChart(hist) {
+      const canvas = document.getElementById('ramChart');
+      if (!canvas) return;
+      if (ramChart) ramChart.destroy();
+      ramChart = new Chart(canvas.getContext('2d'), {
+        type: 'line',
+        data: {
+          labels: hist.map(h => h.time),
+          datasets: [{
+            data: hist.map(h => h.value),
+            borderColor: '#8fb0c1',
+            backgroundColor: 'rgba(180, 205, 224, 0.35)',
+            borderWidth: 3, tension: 0.35, fill: true, pointRadius: 0
+          }]
         },
-        plugins: { legend: { display: false } }
-      }
-    });
+        options: {
+          responsive: true, maintainAspectRatio: false, animation: false,
+          scales: {
+            y: { beginAtZero: true, max: 100, grid: { color: 'rgba(0,0,0,0.05)' }, border: { display: false }, ticks: { stepSize: 50 } },
+            x: { grid: { display: false }, ticks: { display: false }, border: { display: false } }
+          },
+          plugins: { legend: { display: false } }
+        }
+      });
+    }
 
-    // abas: o hash do URL guarda a aba ativa (sobrevive ao recarregamento)
+    /* ---------- sons (gerados no navegador, sem ficheiros) ---------- */
+    let soundOn = true;
+    try { soundOn = localStorage.getItem('sound') !== 'off'; } catch (e) {}
+    let unlocked = false, audio = null;
+    ['pointerdown', 'keydown'].forEach(ev => addEventListener(ev, () => { unlocked = true; }, { once: true }));
+
+    function tone(freq, dur = 0.12, type = 'sine', vol = 0.08, delay = 0) {
+      if (!soundOn || !unlocked) return;
+      try {
+        audio = audio || new (window.AudioContext || window.webkitAudioContext)();
+        if (audio.state === 'suspended') audio.resume();
+        const t = audio.currentTime + delay;
+        const o = audio.createOscillator(), g = audio.createGain();
+        o.type = type; o.frequency.setValueAtTime(freq, t);
+        g.gain.setValueAtTime(0.0001, t);
+        g.gain.exponentialRampToValueAtTime(vol, t + 0.01);
+        g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+        o.connect(g); g.connect(audio.destination);
+        o.start(t); o.stop(t + dur + 0.03);
+      } catch (e) {}
+    }
+    const sfx = {
+      tab:   () => { tone(660, .09); tone(880, .13, 'sine', .07, .07); },
+      hover: () => tone(540, .04, 'triangle', .02),
+      play:  () => { tone(523, .1); tone(659, .1, 'sine', .08, .09); tone(784, .18, 'sine', .08, .18); },
+      pause: () => { tone(784, .1); tone(523, .18, 'sine', .08, .09); },
+      on:    () => { tone(600, .08); tone(900, .12, 'sine', .07, .08); },
+      warn:  () => { tone(440, .16, 'triangle', .07); tone(440, .16, 'triangle', .07, .22); },
+      crit:  () => { tone(330, .2, 'square', .05); tone(247, .3, 'square', .05, .24); }
+    };
+
+    const sndBtn = document.getElementById('snd');
+    function paintSnd() {
+      sndBtn.textContent = soundOn ? 'som: ligado' : 'som: desligado';
+      sndBtn.classList.toggle('off', !soundOn);
+      sndBtn.setAttribute('aria-pressed', String(soundOn));
+    }
+    sndBtn.addEventListener('click', () => {
+      soundOn = !soundOn;
+      try { localStorage.setItem('sound', soundOn ? 'on' : 'off'); } catch (e) {}
+      paintSnd();
+      if (soundOn) sfx.on();
+    });
+    paintSnd();
+
+    /* ---------- abas ---------- */
     const tabs = [...document.querySelectorAll('nav a')];
+    let currentTab = location.hash.slice(1) || 'painel';
     function showTab(name) {
       if (!document.getElementById('pane-' + name)) name = 'painel';
+      currentTab = name;
       tabs.forEach(a => a.classList.toggle('on', a.dataset.tab === name));
       document.querySelectorAll('.pane').forEach(p => p.classList.toggle('on', p.id === 'pane-' + name));
-      ramChart.resize();
+      if (ramChart) ramChart.resize();
     }
-    tabs.forEach(a => a.addEventListener('click', e => {
-      e.preventDefault();
-      history_replace(a.dataset.tab);
-      showTab(a.dataset.tab);
-    }));
-    function history_replace(name) { window.history.replaceState(null, '', '#' + name); }
-    showTab(location.hash.slice(1) || 'painel');
+    tabs.forEach(a => {
+      a.addEventListener('click', e => {
+        e.preventDefault();
+        window.history.replaceState(null, '', '#' + a.dataset.tab);
+        showTab(a.dataset.tab);
+        sfx.tab();
+      });
+      a.addEventListener('mouseenter', () => sfx.hover());
+    });
 
-    // atualização automática a cada 10s, mantendo a aba
-    setTimeout(() => location.reload(), 10000);
+    /* ---------- vinil: play / pause ---------- */
+    const vinyl = document.querySelector('.vinyl');
+    document.getElementById('btnPlay').addEventListener('click', () => { vinyl.style.animationPlayState = 'running'; sfx.play(); });
+    document.getElementById('btnPause').addEventListener('click', () => { vinyl.style.animationPlayState = 'paused'; sfx.pause(); });
+
+    // som suave ao passar o rato nos cartões da lista
+    document.addEventListener('mouseover', e => {
+      const it = e.target.closest && e.target.closest('.item');
+      if (it && !it.contains(e.relatedTarget)) sfx.hover();
+    });
+
+    /* ---------- atualização sem recarregar a página ---------- */
+    const rank = { 'estável': 0, 'sobrecarga': 1, 'crítico': 2 };
+    let lastStatus = ${JSON.stringify(data.status.text)};
+
+    async function refresh() {
+      try {
+        const html = await (await fetch(location.pathname, { cache: 'no-store' })).text();
+        const doc = new DOMParser().parseFromString(html, 'text/html');
+        // o vinil e os botões ficam; só o conteúdo muda (a rotação não reinicia)
+        ['.user', '.arc', '.vinyl-label', '.center', '.side', '.logs'].forEach(sel => {
+          const novo = doc.querySelector(sel), atual = document.querySelector(sel);
+          if (novo && atual) atual.replaceWith(novo);
+        });
+        const h = html.match(new RegExp('const ' + 'histData = (\\[.*?\\]);'));
+        showTab(currentTab);
+        buildChart(h ? JSON.parse(h[1]) : []);
+        const st = html.match(new RegExp('const ' + 'statusNow = "(.*?)";'));
+        if (st && st[1] !== lastStatus) {
+          if ((rank[st[1]] || 0) > (rank[lastStatus] || 0)) (st[1] === 'crítico' ? sfx.crit : sfx.warn)();
+          lastStatus = st[1];
+        }
+      } catch (e) { /* mantém a vista atual e tenta de novo */ }
+    }
+    setInterval(refresh, 10000);
+
+    const histData = ${JSON.stringify(ramHistory)};
+    const statusNow = ${JSON.stringify(data.status.text)};
+    buildChart(histData);
+    showTab(currentTab);
   </script>
 </body>
 </html>`);
